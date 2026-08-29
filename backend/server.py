@@ -18,6 +18,10 @@ from routers import (
 )
 from seed import seed_dashboard, seed_users
 
+# === GIS pipeline routers ===
+from ml.pipeline.admin_override import router as admin_override_router
+from ml.pipeline.router import router as pipeline_router
+
 logger = logging.getLogger("neris")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -26,6 +30,10 @@ app = FastAPI(title="NERIS API")
 for module in (auth, dashboard, escalations, feeds, incidents, notifications, predictions, reports, roads, routing, trips, vehicles):
     app.include_router(module.router, prefix="/api")
 app.include_router(ws_router, prefix="/api")
+
+# === GIS pipeline endpoints ===
+app.include_router(admin_override_router, prefix="/api")
+app.include_router(pipeline_router, prefix="/api")
 
 
 @app.on_event("startup")

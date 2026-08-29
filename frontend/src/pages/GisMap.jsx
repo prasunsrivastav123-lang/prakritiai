@@ -7,15 +7,21 @@ import NavRail from "@/components/NavRail";
 import PageHeader from "@/components/PageHeader";
 import NerMap, { STATUS_COLORS } from "@/components/NerMap";
 import RoadControlDrawer from "@/components/RoadControlDrawer";
+import HazardInjectionPanel from "@/components/HazardInjectionPanel";
+import PipelineStatusWidget from "@/components/PipelineStatusWidget";
+import { useToast } from "@/hooks/use-toast";
 
 export default function GisMap() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const canSeeLiveVehicles = user && ["SUPER_ADMIN", "GOVERNMENT_ADMIN", "GOVERNMENT_OFFICER", "DISTRICT_OFFICER", "FIELD_OFFICER"].includes(user.role);
   const [data, setData] = useState(null);
   const [zones, setZones] = useState([]);
   const [environment, setEnvironment] = useState(null);
   const [layers, setLayers] = useState({ roads: true, vehicles: true, incidents: true });
   const [selectedRoad, setSelectedRoad] = useState(null);
+  const [isDroppingPin, setIsDroppingPin] = useState(false);
+  const [pinCoords, setPinCoords] = useState(null);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -39,12 +45,15 @@ export default function GisMap() {
   useEffect(() => {
     ensureWS();
     const unsub = subscribeWS((msg) => {
-      if (["ROAD_STATUS_CHANGED", "INCIDENT_CREATED", "INCIDENT_VERIFIED", "EMERGENCY_DECLARED", "EMERGENCY_ENDED", "VEHICLE_ADDED"].includes(msg.type)) {
+      if (["ROAD_STATUS_CHANGED", "INCIDENT_CREATED", "INCIDENT_VERIFIED", "EMERGENCY_DECLARED", "EMERGENCY_ENDED", "VEHICLE_ADDED", "hazard_injected"].includes(msg.type)) {
+        if (msg.type === "hazard_injected") {
+          toast({ title: "Live Update", description: "A new hazard was reported." });
+        }
         fetchAll();
       }
     });
     return unsub;
-  }, [fetchAll]);
+  }, [fetchAll, toast]);
 
   return (
     <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="gis-map-page">
@@ -58,13 +67,32 @@ export default function GisMap() {
               vehicles={canSeeLiveVehicles ? data.vehicles : []}
               incidents={data.incidents.filter((i) => i.status !== "RESOLVED")}
               layers={{ ...layers, vehicles: layers.vehicles && canSeeLiveVehicles }}
-              onRoadClick={(props) => setSelectedRoad(props)}
+              onRoadClick={(props) => !isDroppingPin && setSelectedRoad(props)}
               zones={zones}
               environment={environment}
+              isDroppingPin={isDroppingPin}
+              onMapClick={(coords) => {
+                if (isDroppingPin) {
+                  setPinCoords(coords);
+                  setIsDroppingPin(false); // turn off pin dropping after selection
+                }
+              }}
             />
           ) : (
             <div className="absolute inset-0 bg-[var(--surface-sunken)] animate-pulse" />
           )}
+
+          <div className="absolute top-3 left-3 z-10 pointer-events-none">
+            <HazardInjectionPanel
+              isDroppingPin={isDroppingPin}
+              setIsDroppingPin={setIsDroppingPin}
+              pinCoords={pinCoords}
+            />
+          </div>
+
+          <div className="absolute top-3 right-56 z-10 pointer-events-none">
+            <PipelineStatusWidget />
+          </div>
 
           <div className="absolute top-3 right-3 bg-white border hairline rounded-md shadow-sm p-2.5 w-44 z-10" data-testid="gis-layer-control">
             <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">
@@ -88,7 +116,7 @@ export default function GisMap() {
             ))}
           </div>
 
-          <div className="absolute bottom-3 left-3 bg-white/95 border hairline rounded-md shadow-sm px-3 py-2 z-10" data-testid="gis-map-legend">
+          <div className="absolute bottom-3 left-3 bg-white/95 border hairline rounded-md shadow-sm px-3 py-2 z-10 pointer-events-auto" data-testid="gis-map-legend">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {[
                 ["OPEN", "Open"], ["AT_RISK", "At Risk"], ["RESTRICTED", "Restricted"],

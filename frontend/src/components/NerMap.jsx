@@ -55,7 +55,7 @@ function circlePolygon(lng, lat, radiusKm, points = 72) {
   return { type: "Feature", geometry: { type: "Polygon", coordinates: [coords] }, properties: {} };
 }
 
-export default function NerMap({ roads, vehicles, incidents, layers = {}, onRoadClick, center, zoom, route, zones, environment, endpoints }) {
+export default function NerMap({ roads, vehicles, incidents, layers = {}, onRoadClick, center, zoom, route, zones, environment, endpoints, isDroppingPin, onMapClick }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const loadedRef = useRef(false);
@@ -70,6 +70,8 @@ export default function NerMap({ roads, vehicles, incidents, layers = {}, onRoad
   const lastFitRef = useRef("");
   const clickRef = useRef(null);
   clickRef.current = onRoadClick;
+  const mapClickRef = useRef(null);
+  mapClickRef.current = onMapClick;
 
   useEffect(() => {
     const map = new MLMap({
@@ -173,6 +175,20 @@ export default function NerMap({ roads, vehicles, incidents, layers = {}, onRoad
     const map = mapRef.current;
     if (map && loadedRef.current && center) map.jumpTo({ center, zoom: zoom ?? map.getZoom() });
   }, [center, zoom]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.getCanvas().style.cursor = isDroppingPin ? "crosshair" : "";
+    const handler = (e) => {
+      // Don't trigger if they clicked a road (handled elsewhere)
+      if (isDroppingPin && mapClickRef.current) {
+        mapClickRef.current({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+      }
+    };
+    if (isDroppingPin) map.on("click", handler);
+    return () => { if (isDroppingPin) map.off("click", handler); };
+  }, [isDroppingPin]);
 
   useEffect(() => {
     roadsRef.current = roads;
