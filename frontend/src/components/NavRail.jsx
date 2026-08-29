@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 const NAV_GROUPS = {
   gov: [
     { to: "/command-center", icon: LayoutDashboard, label: "Command" },
-    { to: "/map", icon: MapIcon, label: "GIS Map" },
+    { to: "/map", icon: MapIcon, label: "GIS Pipeline" },
     { to: "/routes", icon: RouteIcon, label: "Routes" },
     { to: "/vehicles", icon: Truck, label: "Fleet" },
     { to: "/incidents", icon: TriangleAlert, label: "Incidents" },

@@ -6,6 +6,7 @@ import { ensureWS, subscribeWS } from "@/lib/ws";
 import NavRail from "@/components/NavRail";
 import NerMap, { STATUS_COLORS } from "@/components/NerMap";
 import EmergencyBanner from "@/components/EmergencyBanner";
+import RouteCalculationPanel from "@/components/RouteCalculationPanel";
 
 const VEHICLE_TYPES = [
   { key: "TWO_WHEELER", label: "2W", icon: Bike },
@@ -156,7 +157,9 @@ export default function Routes() {
 
         <div className="flex-1 flex min-h-0">
           {/* Left: form + results */}
-          <div className="w-[380px] flex-shrink-0 bg-white border-r hairline overflow-y-auto p-5">
+          <div className="w-[380px] flex-shrink-0 bg-white border-r hairline overflow-y-auto p-5 space-y-6">
+            <RouteCalculationPanel />
+            <hr className="border-t" />
             <form onSubmit={onSubmit} className="space-y-4" data-testid="route-form">
               <div>
                 <label className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">From</label>

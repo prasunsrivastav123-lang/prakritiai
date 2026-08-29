@@ -5,6 +5,8 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { STATUS_COLORS } from "@/components/NerMap";
 
+import { closeRoad } from "@/lib/pipelineApi";
+
 const STATUS_LABELS = {
   OPEN: "Open", AT_RISK: "At Risk", RESTRICTED: "Restricted",
   BLOCKED: "Blocked", GOVERNMENT_CLOSED: "Gov Closed", UNKNOWN: "Unknown",
@@ -21,6 +23,22 @@ export default function RoadControlDrawer({ road, onClose, onChanged }) {
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const [pipelineEdgeId, setPipelineEdgeId] = useState(road?.id || "");
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+
+  const handlePipelineClose = async (closed) => {
+    if (!pipelineEdgeId) return;
+    setPipelineLoading(true);
+    try {
+      const res = await closeRoad(pipelineEdgeId, closed);
+      toast.success(`Pipeline road ${closed ? "closed" : "opened"} (Edge: ${res.edge_id})`);
+    } catch (err) {
+      toast.error(err.message || "Failed to update pipeline road");
+    } finally {
+      setPipelineLoading(false);
+    }
+  };
 
   if (!road) return null;
   const statusColor = STATUS_COLORS[road.status] || STATUS_COLORS.UNKNOWN;
@@ -154,6 +172,36 @@ export default function RoadControlDrawer({ road, onClose, onChanged }) {
               </button>
               <div className="mt-2 text-[11px] text-neutral-500 text-center">
                 This action is logged in the audit trail.
+              </div>
+
+              <div className="mt-8 p-4 border border-red-200 bg-red-50 rounded-md space-y-3">
+                <div className="text-[11px] uppercase tracking-widest text-red-700 font-semibold flex items-center gap-1.5">
+                  <AlertTriangle size={13} /> Pipeline Control
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-widest text-neutral-600 font-semibold">Edge ID to Close/Open</label>
+                  <input
+                    value={pipelineEdgeId}
+                    onChange={(e) => setPipelineEdgeId(e.target.value)}
+                    className="mt-1.5 w-full h-8 px-2 border hairline rounded-md text-[12px]"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handlePipelineClose(true)}
+                    disabled={pipelineLoading}
+                    className="flex-1 h-8 rounded-md bg-red-600 hover:bg-red-700 text-white text-[12px] font-medium"
+                  >
+                    Close Road
+                  </button>
+                  <button
+                    onClick={() => handlePipelineClose(false)}
+                    disabled={pipelineLoading}
+                    className="flex-1 h-8 rounded-md bg-green-600 hover:bg-green-700 text-white text-[12px] font-medium"
+                  >
+                    Open Road
+                  </button>
+                </div>
               </div>
             </div>
           ) : (

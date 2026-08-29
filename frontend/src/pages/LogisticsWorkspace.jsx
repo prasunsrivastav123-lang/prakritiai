@@ -7,6 +7,7 @@ import { ensureWS, subscribeWS } from "@/lib/ws";
 import NavRail from "@/components/NavRail";
 import PageHeader from "@/components/PageHeader";
 import EmergencyBanner from "@/components/EmergencyBanner";
+import LogisticsOptimizationPanel from "@/components/LogisticsOptimizationPanel";
 
 const SEV_COLORS = { INFO: "#4C7EA8", WARNING: "#C77C00", HIGH: "#D9622B", CRITICAL: "#C4281C", GOV: "#1B4B66" };
 const DELIVERY_STATUS = {
@@ -151,7 +152,9 @@ export default function LogisticsWorkspace() {
         </div>
 
         <div className="flex-1 flex min-h-0">
-          <div className="flex-1 overflow-y-auto p-5 min-w-0">
+          <div className="flex-1 overflow-y-auto p-5 min-w-0 space-y-5">
+            <LogisticsOptimizationPanel />
+
             {/* Trips (driver mode merged into logistics) */}
             <div className="mb-5 bg-white border hairline rounded-md p-4" data-testid="logistics-trips">
               <div className="text-[11px] uppercase tracking-widest text-neutral-500 font-semibold mb-3">Trips — start & live status</div>
