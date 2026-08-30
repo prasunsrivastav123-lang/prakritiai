@@ -237,7 +237,7 @@ async def list_active_vehicles(user: dict = Depends(require_government)):
         "government_id": {"$exists": True, "$ne": None},
         "status": {"$in": ["active", "dispatched", "in_transit"]},
     }
-    cursor = db.vehicles.find(q, {
+    vehicles = await db.vehicles.find(q, {
         "_id": 0,
         "id": 1,
         "government_id": 1,
@@ -251,8 +251,24 @@ async def list_active_vehicles(user: dict = Depends(require_government)):
         "speed": 1,
         "department": 1,
         "destination": 1,
-    })
-    return await cursor.to_list(1000)
+        "updated_at": 1,
+        "last_seen_at": 1,
+    }).to_list(1000)
+
+    from datetime import datetime, timezone
+    now_ts = datetime.now(timezone.utc)
+    for v in vehicles:
+        last_seen_str = v.get("last_seen_at") or v.get("updated_at")
+        if last_seen_str:
+            try:
+                last_seen = datetime.fromisoformat(last_seen_str.replace('Z', '+00:00'))
+                if (now_ts - last_seen).total_seconds() > 600:
+                    v["status"] = "COMMUNICATION_LOST"
+                    await db.vehicles.update_one({"id": v["id"]}, {"$set": {"status": "COMMUNICATION_LOST"}})
+            except Exception:
+                pass
+
+    return vehicles
 
 
 @router.get("/search")
@@ -338,6 +354,21 @@ async def vehicle_tracking_history(
         {"vehicle_id": vehicle_id},
         {"_id": 0},
     ).sort("timestamp", -1).to_list(limit)
+
+
+@router.get("/{vehicle_id}/safety")
+async def driver_safety(vehicle_id: str, user: dict = Depends(require_government)):
+    vehicle = await _vehicle_by_id(vehicle_id)
+    risk = vehicle.get("risk", 0)
+    status = "SAFE"
+    reason = "No hazards detected on route"
+    if risk > 80:
+        status = "STOP"
+        reason = "Critical hazard ahead. Halt immediately."
+    elif risk > 50:
+        status = "CAUTION"
+        reason = "Moderate risk detected. Reduce speed."
+    return {"safety_tier": status, "reason": reason}
 
 
 @router.post("/{vehicle_id}/assign-cargo")

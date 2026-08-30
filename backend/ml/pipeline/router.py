@@ -921,6 +921,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "depot_states": depot_states,
         "srlg_warnings": srlg_warnings,
         "information_sources": information_sources,
+        "fairness_relaxed": allocation_out.get("fairness_relaxed", False) if allocation_out else False,
     }
     await manager.broadcast(ws_payload)
 
@@ -945,6 +946,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "depot_states": depot_states,
         "srlg_warnings": srlg_warnings,
         "information_sources": information_sources,
+        "fairness_relaxed": allocation_out.get("fairness_relaxed", False) if allocation_out else False,
     }
 
 
@@ -1127,3 +1129,22 @@ async def list_pipeline_villages():
 @router.get("/pipeline/supply-routes")
 async def list_supply_routes():
     return await _docs("supply_routes")
+
+@router.post("/pipeline/driver/breakdown")
+async def driver_breakdown(vehicle_id: str = Query(...)):
+    from core.database import db
+    from core.ws import manager
+    
+    vehicle = await db.vehicles.find_one({"id": vehicle_id})
+    if not vehicle:
+        return {"error": "Vehicle not found"}
+    
+    cargo = vehicle.get("cargo") or {}
+    await manager.broadcast({
+        "event": "vehicle_breakdown",
+        "vehicle_id": vehicle_id,
+        "lat": vehicle.get("lat"),
+        "lon": vehicle.get("lon"),
+        "cargo": cargo
+    })
+    return {"status": "success", "message": "Rescue LP triggered", "rescue_inventory": cargo}

@@ -43,6 +43,18 @@ def optimize_allocation(depots, villages, inventory, demand,
         obj.SetCoefficient(var, cost[(d, v)])
     for (v, c), var in unmet.items():
         obj.SetCoefficient(var, BIG_M * PRIORITY.get(c, 0.5))
+
+    # EC12: minimum survival constraint (10%)
+    fairness_slack = {}
+    for v in villages:
+        for c in commodities:
+            req = demand.get((v, c), 0)
+            if req > 0:
+                fairness_slack[v, c] = solver.NumVar(0, solver.infinity(), f"slack_{v}_{c}")
+                served = sum(x.get((d, v, c), 0) for d in depots)
+                solver.Add(served + fairness_slack[v, c] >= 0.1 * req)
+                obj.SetCoefficient(fairness_slack[v, c], BIG_M * 10)
+
     obj.SetMinimization()
 
     if solver.Solve() != pywraplp.Solver.OPTIMAL:
@@ -52,5 +64,8 @@ def optimize_allocation(depots, villages, inventory, demand,
                    if var.solution_value() > 1e-6}
     shortfall   = {k: var.solution_value() for k, var in unmet.items()
                    if var.solution_value() > 1e-6}
+    fairness_relaxed = any(var.solution_value() > 1e-6 for var in fairness_slack.values())
+    
     return {"allocations": allocations, "shortfall": shortfall,
-            "total_cost": solver.Objective().Value()}
+            "total_cost": solver.Objective().Value(),
+            "fairness_relaxed": fairness_relaxed}
