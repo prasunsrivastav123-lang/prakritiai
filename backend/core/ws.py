@@ -7,10 +7,21 @@ from core.security import JWT_SECRET, JWT_ALGORITHM
 class ConnectionManager:
     def __init__(self):
         self.connections = {}  # email -> set of websockets
+        self.missed_events = {}
 
     async def connect(self, websocket: WebSocket, email: str):
         await websocket.accept()
         self.connections.setdefault(email, set()).add(websocket)
+        
+        if email in self.missed_events and self.missed_events[email]:
+            try:
+                await websocket.send_json({
+                    "event": "sync_recovery",
+                    "missed_events": self.missed_events[email]
+                })
+                self.missed_events[email] = []
+            except Exception:
+                pass
 
     def disconnect(self, websocket: WebSocket, email: str):
         conns = self.connections.get(email)
@@ -20,12 +31,20 @@ class ConnectionManager:
                 self.connections.pop(email, None)
 
     async def broadcast(self, message: dict):
-        for conns in list(self.connections.values()):
-            for ws in list(conns):
-                try:
-                    await ws.send_json(message)
-                except Exception:
-                    pass
+        active_emails = list(self.connections.keys())
+        all_emails = list(set(active_emails + list(self.missed_events.keys())))
+        for email in all_emails:
+            conns = self.connections.get(email, set())
+            if not conns:
+                self.missed_events.setdefault(email, []).append(message)
+                if len(self.missed_events[email]) > 50:
+                    self.missed_events[email] = self.missed_events[email][-50:]
+            else:
+                for ws in list(conns):
+                    try:
+                        await ws.send_json(message)
+                    except Exception:
+                        pass
 
     async def send_to_user(self, email: str, message: dict):
         for ws in list(self.connections.get(email, set())):

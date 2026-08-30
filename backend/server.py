@@ -47,6 +47,32 @@ async def on_startup():
     await seed_supply_chain()
     logger.info("NERIS: supply-chain depots, villages, routes, and vehicles ready")
 
+    import asyncio
+    from core.database import db
+    from core.ws import manager
+    from datetime import datetime, timezone
+    
+    async def continuous_reassessment():
+        while True:
+            await asyncio.sleep(60) # check every minute
+            try:
+                hazards = await db.road_blocks.find({"status": {"$ne": "RESOLVED"}}).to_list(100)
+                updated = False
+                for h in hazards:
+                    if h.get("est_clearance_hrs", 1) > 0:
+                        h["est_clearance_hrs"] -= 0.016
+                        if h["est_clearance_hrs"] <= 0:
+                            h["status"] = "RESOLVED"
+                        await db.road_blocks.update_one({"_id": h["_id"]}, {"$set": {"est_clearance_hrs": h["est_clearance_hrs"], "status": h["status"]}})
+                        updated = True
+                
+                if updated:
+                    await manager.broadcast({"event": "hazards_reassessed", "timestamp": datetime.now(timezone.utc).isoformat()})
+            except Exception as e:
+                pass
+
+    asyncio.create_task(continuous_reassessment())
+    logger.info("NERIS: continuous reassessment task started")
 
 @app.on_event("shutdown")
 async def on_shutdown():
