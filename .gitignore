@@ -1,0 +1,12 @@
+﻿.env
+.env.local
+*.env
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.parquet
+field_offline.db
