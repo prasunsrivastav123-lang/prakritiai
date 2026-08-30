@@ -10,3 +10,4 @@ email-validator
 httpx
 PyJWT
 geopandas
+pyarrow
