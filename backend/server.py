@@ -40,18 +40,22 @@ app.include_router(pipeline_router, prefix="/api")
 
 @app.on_event("startup")
 async def on_startup():
-    await seed_users()
-    logger.info("NERIS: users seeded (owner + demo accounts)")
-    await seed_dashboard()
-    logger.info("NERIS: dashboard demo dataset ready")
-    await seed_supply_chain()
-    logger.info("NERIS: supply-chain depots, villages, routes, and vehicles ready")
+    try:
+        await seed_users()
+        logger.info("NERIS: users seeded (owner + demo accounts)")
+        await seed_dashboard()
+        logger.info("NERIS: dashboard demo dataset ready")
+        await seed_supply_chain()
+        logger.info("NERIS: supply-chain depots, villages, routes, and vehicles ready")
+    except Exception:
+        logger.exception("NERIS: startup seeding failed")
+        raise
 
     import asyncio
     from core.database import db
     from core.ws import manager
     from datetime import datetime, timezone
-    
+
     async def continuous_reassessment():
         while True:
             await asyncio.sleep(60) # check every minute
@@ -65,7 +69,7 @@ async def on_startup():
                             h["status"] = "RESOLVED"
                         await db.road_blocks.update_one({"_id": h["_id"]}, {"$set": {"est_clearance_hrs": h["est_clearance_hrs"], "status": h["status"]}})
                         updated = True
-                
+
                 if updated:
                     await manager.broadcast({"event": "hazards_reassessed", "timestamp": datetime.now(timezone.utc).isoformat()})
             except Exception as e:
