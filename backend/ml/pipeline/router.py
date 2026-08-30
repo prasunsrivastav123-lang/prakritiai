@@ -596,6 +596,24 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    from ml.pipeline.resilience import HAZARD_PRIORITY
+    information_sources = [req.source]
+    existing_hazard = None
+    if match:
+        existing_hazard = await db.road_blocks.find_one({"edge_id": match["edge_id"]})
+        if existing_hazard:
+            ext_src = existing_hazard.get("source")
+            if ext_src and ext_src != req.source:
+                information_sources.append(ext_src)
+            if HAZARD_PRIORITY.get(ext_src, 0) > HAZARD_PRIORITY.get(req.source, 0):
+                hazard_doc["status"] = "SUPERSEDED"
+                hazard_doc["superseded_by"] = ext_src
+            elif HAZARD_PRIORITY.get(req.source, 0) > HAZARD_PRIORITY.get(ext_src, 0):
+                await db.road_blocks.update_one(
+                    {"edge_id": match["edge_id"]},
+                    {"$set": {"status": "SUPERSEDED", "superseded_by": req.source}}
+                )
+
     if not match:
         warning = f"No road found within 500m of ({req.lat}, {req.lon})"
         payload = {
@@ -665,6 +683,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
     alternative_routes: List[Dict[str, Any]] = []
     allocation_out: Optional[Dict[str, Any]] = None
     estimated_cost = 0.0
+    srlg_warnings = []
 
     try:
         from ml.pipeline.routing import risk_aware_dijkstra, get_k_feasible_paths_hybrid
@@ -677,6 +696,9 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 if G.has_edge(a, b):
                     G[a][b]["closed"] = True
                     G[a][b]["block_probability"] = blockage
+                    if G[a][b].get("bridge_id"):
+                        if f"SRLG Warning: Hazard on shared bridge {G[a][b]['bridge_id']}" not in srlg_warnings:
+                            srlg_warnings.append(f"SRLG Warning: Hazard on shared bridge {G[a][b]['bridge_id']}")
 
         for route in affected_villages:
             src = route.get("depot_node") or (route.get("path") or [None])[0]
@@ -754,6 +776,24 @@ async def inject_and_optimize(req: InjectHazardRequest):
                             "status": "ISOLATED",
                             "weighted_commodities": weighted_commodities,
                             "delivery_options": ["airdrop", "helicopter", "drone"]
+                        })
+
+            from ml.pipeline.resilience import haversine_distance
+            for vil in villages:
+                if "lat" in vil and "lon" in vil:
+                    dist = haversine_distance(req.lat, req.lon, vil["lat"], vil["lon"])
+                    if dist <= 500:
+                        await db.villages.update_one({"id": vil["id"]}, {"$set": {"village_state": "EVACUATION_REVIEW"}})
+                        await manager.broadcast({
+                            "event": "evacuation_alert",
+                            "village_id": vil["id"],
+                            "recommendation": "Evacuation Recommended by AI",
+                            "status": "EVACUATION_REVIEW"
+                        })
+                        await manager.broadcast({
+                            "event": "cascading_reroute",
+                            "village_id": vil["id"],
+                            "downstream_preposition": True
                         })
 
             feasible = {}
@@ -879,6 +919,8 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "affected_vehicles": affected_vehicles,
         "commodity_routes": commodity_routes,
         "depot_states": depot_states,
+        "srlg_warnings": srlg_warnings,
+        "information_sources": information_sources,
     }
     await manager.broadcast(ws_payload)
 
@@ -901,6 +943,8 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "vehicles_rerouted": rerouted,
         "commodity_routes": commodity_routes,
         "depot_states": depot_states,
+        "srlg_warnings": srlg_warnings,
+        "information_sources": information_sources,
     }
 
 
@@ -962,8 +1006,18 @@ async def ai_predict(req: AIPredictRequest):
     pre_positioning_recommended = peak > threshold
     pre_positioning_plan = None
     cost_comparison = None
+    last_safe_departure = None
 
     if pre_positioning_recommended:
+        from ml.pipeline.resilience import calculate_last_safe_departure
+        closure_time = 2.0 if peak > 0.9 else 6.0
+        travel_time = 1.0
+        minutes = calculate_last_safe_departure(closure_time, travel_time)
+        last_safe_departure = {
+            "minutes_remaining": round(minutes),
+            "status": "POSSIBLE" if minutes > 0 else "TOO_LATE"
+        }
+
         n_vehicles = max(len(affected_routes), 2)
         commodities = {"food": 80 * n_vehicles, "water": 120 * n_vehicles, "medicine": 40 * n_vehicles, "fuel": 30 * n_vehicles}
         route_hint = affected_routes[0] if affected_routes else {
@@ -987,6 +1041,17 @@ async def ai_predict(req: AIPredictRequest):
             "cost": pre_cost,
         }
 
+    # EC15
+    confidence_action = {}
+    if peak < 0.3:
+        confidence_action = {"action": "MONITOR", "cost_false_positive": 1000, "cost_false_negative": 50000}
+    elif peak < 0.5:
+        confidence_action = {"action": "PREPARE", "cost_false_positive": 5000, "cost_false_negative": 100000}
+    elif peak < 0.7:
+        confidence_action = {"action": "PRE_POSITION", "cost_false_positive": 25000, "cost_false_negative": 300000}
+    else:
+        confidence_action = {"action": "EMERGENCY_DISPATCH", "cost_false_positive": 50000, "cost_false_negative": 1000000}
+
     result = {
         "status": "success",
         "location": {"lat": req.lat, "lon": req.lon},
@@ -1001,6 +1066,8 @@ async def ai_predict(req: AIPredictRequest):
         "cost_comparison": cost_comparison,
         "route_criticality": route_criticality,
         "sole_route_alert": sole_route_alert,
+        "last_safe_departure": last_safe_departure,
+        "confidence_action": confidence_action,
     }
 
     if risk_level in ("high", "critical") or pre_positioning_recommended:
@@ -1016,6 +1083,8 @@ async def ai_predict(req: AIPredictRequest):
             "cost_comparison": cost_comparison,
             "route_criticality": route_criticality,
             "sole_route_alert": sole_route_alert,
+            "last_safe_departure": last_safe_departure,
+            "confidence_action": confidence_action,
         })
 
     return result
