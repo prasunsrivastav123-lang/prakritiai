@@ -39,6 +39,7 @@ COMMODITY_COLORS = {
 }
 
 HAZARD_PRIORITY = {
+    "government": 5,
     "verified_closure": 5,
     "field_report": 4,
     "satellite": 3,

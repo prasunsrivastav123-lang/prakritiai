@@ -3,6 +3,7 @@ import heapq
 import networkx as nx
 from dataclasses import dataclass
 from typing import List, Dict, Any
+import pandas as pd
 
 # Import the new hybrid engine
 from ml.pipeline.hybrid_routing_engine import HybridRoutingEngine, OlaMapsTrafficClient
@@ -67,6 +68,7 @@ def build_graph(roads) -> nx.DiGraph:
             "risk_growth_per_hour": float(r.get("risk_growth_per_hour", 0)),
             "closed": bool(r.get("closed", False)),
             "reopen_after_hours": float(r.get("reopen_after_hours", 0)),
+            "bridge_id": str(r["bridge_id"]) if "bridge_id" in r and pd.notna(r.get("bridge_id")) else None,
         }
         G.add_edge(r["u"], r["v"], **d)
         if bool(r.get("bidirectional", True)):

@@ -215,6 +215,18 @@ export default function PrePositioningPanel({ onPrediction }) {
                   </div>
                 )}
 
+                {prediction.last_safe_departure && (
+                  <div className={`p-2 rounded border text-[11px] ${prediction.last_safe_departure.status === 'TOO_LATE' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}>
+                    <strong>Last Safe Departure:</strong> {prediction.last_safe_departure.minutes_remaining} mins remaining ({prediction.last_safe_departure.status})
+                  </div>
+                )}
+                {prediction.confidence_action && (
+                  <div className="p-2 bg-blue-50 border border-blue-200 text-blue-800 text-[11px] rounded">
+                    <strong>AI Action:</strong> {prediction.confidence_action.action}<br/>
+                    <span className="text-[9px] opacity-80">FP Cost: ₹{prediction.confidence_action.cost_false_positive.toLocaleString("en-IN")} | FN Cost: ₹{prediction.confidence_action.cost_false_negative.toLocaleString("en-IN")}</span>
+                  </div>
+                )}
+
                 {/* Action buttons */}
                 <div className="flex gap-2">
                   <Button size="sm" className="flex-1 h-8 text-[11px] bg-purple-600 hover:bg-purple-700" onClick={approveDispatch}>

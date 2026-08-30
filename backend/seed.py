@@ -355,6 +355,13 @@ async def seed_supply_chain():
         roads_path = os.environ.get("ROADS_PARQUET", str(data_dir / "roads.parquet"))
         if Path(roads_path).exists():
             roads = gpd.read_parquet(roads_path)
+            if "bridge_id" not in roads.columns:
+                import hashlib
+                def _get_bridge_id(eid):
+                    h = int(hashlib.md5(str(eid).encode()).hexdigest(), 16)
+                    return f"br_{eid}" if h % 20 == 0 else None
+                roads["bridge_id"] = roads["edge_id"].apply(_get_bridge_id)
+                roads.to_parquet(roads_path)
     except Exception:
         roads = None
 

@@ -120,6 +120,9 @@ export default function GisMap() {
         if (msg.depot_states) {
           setDepots(prev => prev.map(d => ({ ...d, state: msg.depot_states[d.id] || d.state })));
         }
+        if (msg.srlg_warnings && msg.srlg_warnings.length > 0) {
+          msg.srlg_warnings.forEach(w => toast({ title: "SRLG Warning", description: w, variant: "destructive" }));
+        }
         toast({ title: "⚠ Hazard Injected", description: `${hazard.hazard_type || 'Unknown'} hazard reported` });
         fetchAll();
       }
@@ -133,6 +136,12 @@ export default function GisMap() {
             ? { ...v, lat: msg.location?.lat ?? msg.lat ?? v.lat, lon: msg.location?.lon ?? msg.lon ?? v.lon, speed: msg.speed_kmh ?? msg.speed ?? v.speed }
             : v
         ));
+      }
+      else if (eventType === "evacuation_alert") {
+        toast({ title: "Evacuation Alert", description: msg.recommendation, variant: "destructive" });
+      }
+      else if (eventType === "cascading_reroute") {
+        toast({ title: "Cascading Reroute", description: `Downstream prepositioning triggered for village ${msg.village_id}` });
       }
       else if (eventType === "ai_prediction") {
         setHazards(prev => [...prev, {
