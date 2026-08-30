@@ -143,6 +143,25 @@ export default function GisMap() {
       else if (eventType === "cascading_reroute") {
         toast({ title: "Cascading Reroute", description: `Downstream prepositioning triggered for village ${msg.village_id}` });
       }
+      else if (eventType === "vehicle_breakdown") {
+        toast({ title: "Vehicle Breakdown", description: `Rescue LP triggered for vehicle ${msg.vehicle_id}`, variant: "destructive" });
+      }
+      else if (eventType === "hazards_reassessed") {
+        toast({ title: "Hazards Reassessed", description: "Hazard decay updated." });
+        fetchAll();
+      }
+      else if (eventType === "sync_recovery") {
+        if (msg.missed_events) {
+            toast({ title: "Reconnected", description: `Recovering ${msg.missed_events.length} missed events.` });
+            msg.missed_events.forEach(e => {
+               // recursive or simulated dispatch
+               const evt = new MessageEvent("message", { data: JSON.stringify(e) });
+               wsRef.current?.dispatchEvent(evt); // or manually call the handler
+            });
+            // Better to just refetch all to be safe
+            fetchAll();
+        }
+      }
       else if (eventType === "ai_prediction") {
         setHazards(prev => [...prev, {
           lat: msg.lat, lon: msg.lon,
