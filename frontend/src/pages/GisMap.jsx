@@ -49,6 +49,7 @@ export default function GisMap() {
   const [blockedEdges, setBlockedEdges] = useState([]);
   const [alternativeRoutes, setAlternativeRoutes] = useState([]);
   const [prePositioningRoutes, setPrePositioningRoutes] = useState([]);
+  const [commodityRoutes, setCommodityRoutes] = useState([]);
 
   // Existing: fetch dashboard data
   const fetchAll = useCallback(async () => {
@@ -113,6 +114,9 @@ export default function GisMap() {
         if (msg.alternative_routes) {
           setAlternativeRoutes(prev => [...prev, ...msg.alternative_routes]);
         }
+        if (msg.commodity_routes) {
+          setCommodityRoutes(prev => [...prev, ...msg.commodity_routes]);
+        }
         toast({ title: "⚠ Hazard Injected", description: `${hazard.hazard_type || 'Unknown'} hazard reported` });
         fetchAll();
       }
@@ -167,6 +171,7 @@ export default function GisMap() {
             blockedEdges={blockedEdges}
             alternativeRoutes={alternativeRoutes}
             prePositioningRoutes={prePositioningRoutes}
+            commodityRoutes={commodityRoutes}
             depots={depots}
             villages={villages}
             layers={{ ...layers, vehicles: layers.vehicles && canSeeLiveVehicles }}

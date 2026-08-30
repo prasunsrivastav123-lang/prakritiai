@@ -769,6 +769,59 @@ async def inject_and_optimize(req: InjectHazardRequest):
             veh["assigned_route"] = assigned
             rerouted.append(veh["id"])
 
+    commodity_routes = []
+    if allocation_out and "allocations" in allocation_out:
+        from shapely.ops import linemerge
+        from ml.pipeline.resilience import COMMODITY_COLORS
+        for key, qty in allocation_out["allocations"].items():
+            if qty <= 0: continue
+            try:
+                parts = key.split("|")
+                if len(parts) == 3:
+                    d_id, v_id, comm = parts
+                else:
+                    import ast
+                    tup = ast.literal_eval(key)
+                    if len(tup) == 3:
+                        d_id, v_id, comm = tup
+                    else:
+                        continue
+                
+                depot_doc = next((d for d in depots if d["id"] == d_id), None)
+                village_doc = next((v for v in (village_docs or villages) if v.get("id") == v_id), None)
+                if not depot_doc or not village_doc: continue
+                d_lat, d_lon = depot_doc.get("lat"), depot_doc.get("lon")
+                v_lat, v_lon = village_doc.get("lat"), village_doc.get("lon")
+                if d_lat is None or v_lat is None: continue
+                
+                s_edge = _find_nearest_edge(d_lat, d_lon)
+                t_edge = _find_nearest_edge(v_lat, v_lon)
+                r_best = risk_aware_dijkstra(G, s_edge, t_edge)
+                
+                if r_best and r_best.path:
+                    roads = _get_roads()
+                    path_edges = []
+                    for i in range(len(r_best.path) - 1):
+                        u, v = r_best.path[i], r_best.path[i+1]
+                        edge_geom = roads[((roads["u"] == u) & (roads["v"] == v)) | ((roads["u"] == v) & (roads["v"] == u))]
+                        if not edge_geom.empty:
+                            geom = edge_geom.iloc[0].geometry
+                            if geom and not geom.is_empty:
+                                path_edges.append(geom)
+                    if path_edges:
+                        merged = linemerge(path_edges)
+                        commodity_routes.append({
+                            "depot_id": d_id,
+                            "village_id": v_id,
+                            "commodity": comm,
+                            "quantity": qty,
+                            "color": COMMODITY_COLORS.get(comm.lower(), "#000000"),
+                            "geometry": mapping(merged),
+                            "eta_hours": r_best.travel_hours
+                        })
+            except Exception as e:
+                logger.warning(f"Failed to build commodity route for {key}: {e}")
+
     vehicles_needed = max(len(village_ids), 1) if village_ids else 0
     if not estimated_cost:
         estimated_cost = vehicles_needed * 35000
@@ -787,6 +840,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "alternative_routes": alternative_routes,
         "allocation": allocation_out,
         "affected_vehicles": affected_vehicles,
+        "commodity_routes": commodity_routes,
     }
     await manager.broadcast(ws_payload)
 
@@ -807,6 +861,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "vehicles_needed": vehicles_needed,
         "estimated_cost": estimated_cost,
         "vehicles_rerouted": rerouted,
+        "commodity_routes": commodity_routes,
     }
 
 

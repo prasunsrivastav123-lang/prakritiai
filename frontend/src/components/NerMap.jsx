@@ -80,6 +80,7 @@ export default function NerMap({
   blockedEdges = [],
   alternativeRoutes = [],
   prePositioningRoutes = [],
+  commodityRoutes = [],
   depots = [],
   villages = [],
   trafficOverlay = [],
@@ -152,6 +153,7 @@ export default function NerMap({
         map.addSource("pre_pos", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addSource("hazard_zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addSource("traffic", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("commodity_routes", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 
         map.addLayer({
           id: "hazard-zones-fill", type: "fill", source: "hazard_zones",
@@ -207,6 +209,28 @@ export default function NerMap({
             "line-opacity": 0.6
           }
         });
+
+        map.addLayer({
+          id: "commodity-routes-line", type: "line", source: "commodity_routes",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": ["get", "color"], "line-width": 3, "line-opacity": 0.9 }
+        });
+
+        map.on("click", "commodity-routes-line", (e) => {
+          if (e.features && e.features[0]) {
+            const p = e.features[0].properties;
+            new Popup().setLngLat(e.lngLat)
+              .setHTML(`<div class="p-2">
+                <strong>${safeUpper(p.commodity)} Route</strong><br/>
+                Qty: ${p.quantity}<br/>
+                ETA: ${p.eta_hours ? parseFloat(p.eta_hours).toFixed(1) + 'h' : 'N/A'}<br/>
+                ${p.depot_id} &rarr; ${p.village_id}
+              </div>`)
+              .addTo(map);
+          }
+        });
+        map.on("mouseenter", "commodity-routes-line", () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", "commodity-routes-line", () => { map.getCanvas().style.cursor = ""; });
 
         map.on("click", "roads-line", (e) => {
           if (onRoadClick && e.features && e.features[0]) onRoadClick(e.features[0].properties);
@@ -268,6 +292,14 @@ export default function NerMap({
       };
       map.getSource("pre_pos").setData(prePosFC);
 
+      const commodityFC = {
+        type: "FeatureCollection",
+        features: (commodityRoutes || []).filter(r => r && r.geometry).map(r => ({
+          type: "Feature", geometry: r.geometry, properties: r
+        }))
+      };
+      map.getSource("commodity_routes").setData(commodityFC);
+
       const hazardZonesFC = {
         type: "FeatureCollection",
         features: (hazards || []).map(h => {
@@ -298,7 +330,7 @@ export default function NerMap({
     } catch (err) {
       console.error("NerMap: error updating sources", err);
     }
-  }, [roads, blockedEdges, alternativeRoutes, prePositioningRoutes, hazards, trafficOverlay, layers.traffic]);
+  }, [roads, blockedEdges, alternativeRoutes, prePositioningRoutes, commodityRoutes, hazards, trafficOverlay, layers.traffic]);
 
   // Update Markers — ALL with NaN guards
   useEffect(() => {
@@ -395,6 +427,10 @@ export default function NerMap({
           <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm" style={{ background: STATUS_COLORS.BLOCKED }} /><span>Blocked Road</span></div>
           <div className="flex items-center gap-2"><div className="w-3 h-[2px]" style={{ background: STATUS_COLORS.ALT_ROUTE }} /><span>Alt Route</span></div>
           <div className="flex items-center gap-2"><div className="w-3 h-[2px] border-b-2 border-dashed" style={{ borderColor: STATUS_COLORS.PRE_POS }} /><span>Pre-pos Plan</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-[2px]" style={{ background: "#16A34A" }} /><span>Food</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-[2px]" style={{ background: "#2563EB" }} /><span>Water</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-[2px]" style={{ background: "#DC2626" }} /><span>Medicine</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-[2px]" style={{ background: "#EA580C" }} /><span>Fuel</span></div>
           <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-blue-600" /><span>Flood (Gov)</span></div>
           <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-cyan-400 border border-dashed border-white" /><span>Flood (AI)</span></div>
           <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-orange-600" /><span>Landslide (Gov)</span></div>
