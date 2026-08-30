@@ -1,5 +1,12 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 
-client = AsyncIOMotorClient(os.environ["MONGO_URL"])
-db = client[os.environ["DB_NAME"]]
+MONGO_URL = os.environ.get("MONGO_URL")
+DB_NAME = os.environ.get("DB_NAME")
+
+client = AsyncIOMotorClient(
+    MONGO_URL,
+    serverSelectionTimeoutMS=5000,
+    connectTimeoutMS=5000,
+)
+db = client[DB_NAME]
