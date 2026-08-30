@@ -196,3 +196,297 @@ async def seed_dashboard():
     await db.field_reports.insert_many([{**f, "source": "DEMO"} for f in DEMO_FIELD_REPORTS])
     await db.environment_events.insert_many([{**e, "source": "DEMO"} for e in DEMO_ENVIRONMENT])
     await db.meta.update_one({"key": "seed_version"}, {"$set": {"value": SEED_VERSION}}, upsert=True)
+
+
+# =============================
+# Supply-chain seed (depots, NER villages, routes, gov vehicles)
+# =============================
+
+SUPPLY_DEPOTS = [
+    {"id": "dep-shillong", "name": "Shillong Central Depot", "lat": 25.5759, "lon": 91.8827, "state": "Meghalaya",
+     "inventory": {"food": 8000, "water": 12000, "medicine": 2500, "fuel": 4000}},
+    {"id": "dep-guwahati", "name": "Guwahati Regional Depot", "lat": 26.1445, "lon": 91.7362, "state": "Assam",
+     "inventory": {"food": 15000, "water": 18000, "medicine": 5000, "fuel": 7000}},
+    {"id": "dep-imphal", "name": "Imphal Depot", "lat": 24.8170, "lon": 93.9368, "state": "Manipur",
+     "inventory": {"food": 6000, "water": 9000, "medicine": 1800, "fuel": 3000}},
+    {"id": "dep-agartala", "name": "Agartala Depot", "lat": 23.8315, "lon": 91.2866, "state": "Tripura",
+     "inventory": {"food": 5500, "water": 8000, "medicine": 1600, "fuel": 2500}},
+    {"id": "dep-aizawl", "name": "Aizawl Depot", "lat": 23.7271, "lon": 92.7176, "state": "Mizoram",
+     "inventory": {"food": 4000, "water": 6500, "medicine": 1200, "fuel": 2000}},
+]
+
+SUPPLY_VILLAGES = [
+    {"id": "vil-nongstoin", "name": "Nongstoin", "lat": 25.5060, "lon": 91.0085, "state": "Meghalaya", "depot_id": "dep-shillong",
+     "population": 28700, "demand": {"food": 420, "water": 610, "medicine": 90, "fuel": 70}},
+    {"id": "vil-jowai", "name": "Jowai", "lat": 25.4500, "lon": 92.2500, "state": "Meghalaya", "depot_id": "dep-shillong",
+     "population": 28400, "demand": {"food": 380, "water": 540, "medicine": 80, "fuel": 60}},
+    {"id": "vil-williamnagar", "name": "Williamnagar", "lat": 25.5700, "lon": 90.6000, "state": "Meghalaya", "depot_id": "dep-guwahati",
+     "population": 18200, "demand": {"food": 310, "water": 480, "medicine": 70, "fuel": 55}},
+    {"id": "vil-ukhrul", "name": "Ukhrul", "lat": 24.8200, "lon": 94.3600, "state": "Manipur", "depot_id": "dep-imphal",
+     "population": 24700, "demand": {"food": 360, "water": 520, "medicine": 95, "fuel": 65}},
+    {"id": "vil-senapati", "name": "Senapati", "lat": 25.3000, "lon": 94.1500, "state": "Manipur", "depot_id": "dep-imphal",
+     "population": 19100, "demand": {"food": 290, "water": 430, "medicine": 75, "fuel": 50}},
+    {"id": "vil-kohima-hq", "name": "Kohima", "lat": 25.6750, "lon": 94.1086, "state": "Nagaland", "depot_id": "dep-guwahati",
+     "population": 99000, "demand": {"food": 900, "water": 1300, "medicine": 220, "fuel": 180}},
+    {"id": "vil-mokokchung-hq", "name": "Mokokchung", "lat": 26.3300, "lon": 94.5200, "state": "Nagaland", "depot_id": "dep-guwahati",
+     "population": 35900, "demand": {"food": 410, "water": 590, "medicine": 85, "fuel": 70}},
+    {"id": "vil-tuensang", "name": "Tuensang", "lat": 26.2700, "lon": 94.8300, "state": "Nagaland", "depot_id": "dep-guwahati",
+     "population": 36700, "demand": {"food": 400, "water": 580, "medicine": 88, "fuel": 72}},
+]
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    import math
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(min(1.0, a)))
+
+
+def _snap_edge(roads, lat, lon):
+    """Return (edge_id, node_u, node_v, geometry) for the nearest road, or None."""
+    import pandas as pd
+    from shapely.geometry import Point
+    import geopandas as gpd
+    if roads is None or len(roads) == 0:
+        return None
+    try:
+        roads_m = roads.to_crs(32646)
+        pt = gpd.GeoDataFrame([{"geometry": Point(lon, lat)}], crs="EPSG:4326").to_crs(32646)
+        keep = [c for c in ["edge_id", "geometry", "u", "v"] if c in roads_m.columns]
+        nearest = gpd.sjoin_nearest(pt, roads_m[keep], how="left", max_distance=25000, distance_col="dist_m")
+        if nearest.empty or pd.isna(nearest.iloc[0].get("edge_id")):
+            return None
+        eid = str(nearest.iloc[0]["edge_id"])
+        orig = roads[roads["edge_id"].astype(str) == eid]
+        if orig.empty:
+            return None
+        row = orig.iloc[0]
+        geom = row.geometry
+        u = str(row["u"]) if "u" in orig.columns and pd.notna(row.get("u")) else None
+        v = str(row["v"]) if "v" in orig.columns and pd.notna(row.get("v")) else None
+        if (u is None or v is None) and geom is not None and not geom.is_empty:
+            coords = list(geom.coords)
+            u = u or f"{coords[0][0]:.5f},{coords[0][1]:.5f}"
+            v = v or f"{coords[-1][0]:.5f},{coords[-1][1]:.5f}"
+        return {"edge_id": eid, "u": u, "v": v, "geometry": geom}
+    except Exception:
+        return None
+
+
+def _build_seed_graph(roads):
+    import networkx as nx
+    import pandas as pd
+    G = nx.Graph()
+    if roads is None or len(roads) == 0:
+        return G
+    has_uv = "u" in roads.columns and "v" in roads.columns
+    for _, r in roads.iterrows():
+        geom = r.geometry
+        if geom is None or geom.is_empty:
+            continue
+        if has_uv and pd.notna(r.get("u")) and pd.notna(r.get("v")):
+            u, v = str(r["u"]), str(r["v"])
+        else:
+            coords = list(geom.coords)
+            u = f"{coords[0][0]:.5f},{coords[0][1]:.5f}"
+            v = f"{coords[-1][0]:.5f},{coords[-1][1]:.5f}"
+        length = r.get("length")
+        if length is None or (isinstance(length, float) and pd.isna(length)):
+            length = float(r.get("length_km") or 0) * 1000.0 or (geom.length if geom else 1.0)
+        G.add_edge(u, v, edge_id=str(r["edge_id"]), length=float(length), geometry=geom)
+    return G
+
+
+def _path_edge_ids(G, src, tgt):
+    import networkx as nx
+    if not src or not tgt or src not in G or tgt not in G:
+        return [], src, tgt, 0.0
+    try:
+        nodes = nx.shortest_path(G, src, tgt, weight="length")
+    except Exception:
+        return [], src, tgt, 0.0
+    eids = []
+    total = 0.0
+    for a, b in zip(nodes[:-1], nodes[1:]):
+        data = G[a][b]
+        eids.append(data.get("edge_id"))
+        total += float(data.get("length") or 0)
+    return eids, src, tgt, total
+
+
+def _interpolate_line(depot, village, n=20):
+    coords = []
+    for i in range(n):
+        t = i / (n - 1) if n > 1 else 0
+        lat = depot["lat"] + (village["lat"] - depot["lat"]) * t
+        lon = depot["lon"] + (village["lon"] - depot["lon"]) * t
+        coords.append((lat, lon))
+    return coords
+
+
+async def seed_supply_chain():
+    """Idempotent NER supply-chain demo: depots, villages, routes, gov vehicles, GPS traces."""
+    import os
+    from pathlib import Path
+
+    depots_exist = await db.depots.count_documents({"id": "dep-shillong"})
+    if not depots_exist:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.depots.insert_many([{**d, "source": "SUPPLY_CHAIN", "created_at": now} for d in SUPPLY_DEPOTS])
+
+    for vil in SUPPLY_VILLAGES:
+        if await db.villages.count_documents({"id": vil["id"]}) == 0:
+            await db.villages.insert_one({
+                **vil,
+                "district": vil["name"],
+                "isolation_risk": "MEDIUM",
+                "days_to_stockout": 6,
+                "primary_commodity": "FOOD",
+                "source": "SUPPLY_CHAIN",
+            })
+
+    roads = None
+    try:
+        import geopandas as gpd
+        data_dir = Path(__file__).resolve().parent / "data" / "processed"
+        roads_path = os.environ.get("ROADS_PARQUET", str(data_dir / "roads.parquet"))
+        if Path(roads_path).exists():
+            roads = gpd.read_parquet(roads_path)
+    except Exception:
+        roads = None
+
+    G = _build_seed_graph(roads) if roads is not None else None
+    depot_by_id = {d["id"]: d for d in SUPPLY_DEPOTS}
+
+    routes = []
+    for vil in SUPPLY_VILLAGES:
+        depot = depot_by_id[vil["depot_id"]]
+        path = []
+        depot_node = village_node = None
+        length_m = _haversine_km(depot["lat"], depot["lon"], vil["lat"], vil["lon"]) * 1000.0
+        if G is not None and G.number_of_edges() > 0:
+            d_edge = _snap_edge(roads, depot["lat"], depot["lon"])
+            v_edge = _snap_edge(roads, vil["lat"], vil["lon"])
+            if d_edge and v_edge:
+                path, depot_node, village_node, length_m = _path_edge_ids(
+                    G, d_edge.get("u"), v_edge.get("u"),
+                )
+                if not path:
+                    path, depot_node, village_node, length_m = _path_edge_ids(
+                        G, d_edge.get("v"), v_edge.get("v"),
+                    )
+                if not path:
+                    path = [d_edge["edge_id"], v_edge["edge_id"]]
+                    depot_node, village_node = d_edge.get("u"), v_edge.get("u")
+                    length_m = _haversine_km(depot["lat"], depot["lon"], vil["lat"], vil["lon"]) * 1000.0
+        eta = max(15, int((length_m / 1000.0) / 40.0 * 60))
+        routes.append({
+            "route_id": f"sr-{vil['id']}",
+            "village_id": vil["id"],
+            "depot_id": vil["depot_id"],
+            "path": path,
+            "depot_node": depot_node,
+            "village_node": village_node,
+            "eta_minutes": eta,
+            "active": True,
+            "origin": {"lat": depot["lat"], "lon": depot["lon"], "name": depot["name"]},
+            "destination": {"lat": vil["lat"], "lon": vil["lon"], "name": vil["name"]},
+            "source": "SUPPLY_CHAIN",
+        })
+
+    if await db.supply_routes.count_documents({"route_id": "sr-vil-nongstoin"}) == 0:
+        await db.supply_routes.insert_many(routes)
+
+    drivers = [
+        {"name": "R. Lyngdoh", "phone": "+91-94361-11001", "license": "ML-042011-0012345"},
+        {"name": "P. Sharma", "phone": "+91-98640-22002", "license": "AS-031998-0098765"},
+        {"name": "T. Singh", "phone": "+91-84140-33003", "license": "MN-2015-4455667"},
+        {"name": "N. Ao", "phone": "+91-94360-44004", "license": "NL-2008-1122334"},
+        {"name": "S. Debbarma", "phone": "+91-98625-55005", "license": "TR-2012-7788990"},
+        {"name": "L. Chhangte", "phone": "+91-94361-66006", "license": "MZ-2016-3344556"},
+        {"name": "B. Kalita", "phone": "+91-99540-77007", "license": "AS-2005-5566778"},
+        {"name": "K. Angami", "phone": "+91-89740-88008", "license": "NL-2011-9900112"},
+    ]
+    gov_vehicles = [
+        {"government_id": "AS-01-AB-1234", "vehicle_type": "truck", "status": "active", "department": "Assam SDMA"},
+        {"government_id": "ML-02-CD-2345", "vehicle_type": "truck", "status": "active", "department": "Meghalaya SDMA"},
+        {"government_id": "MN-03-EF-3456", "vehicle_type": "truck", "status": "active", "department": "Manipur SDMA"},
+        {"government_id": "NL-04-GH-4567", "vehicle_type": "ambulance", "status": "idle", "department": "Nagaland Health"},
+        {"government_id": "TR-05-IJ-5678", "vehicle_type": "supply_truck", "status": "idle", "department": "Tripura Logistics"},
+        {"government_id": "MZ-06-KL-6789", "vehicle_type": "supply_truck", "status": "idle", "department": "Mizoram SDMA"},
+        {"government_id": "AS-07-MN-7890", "vehicle_type": "rescue_vehicle", "status": "maintenance", "department": "Assam SDRF"},
+        {"government_id": "NL-08-OP-8901", "vehicle_type": "rescue_vehicle", "status": "maintenance", "department": "Nagaland SDRF"},
+    ]
+
+    now = datetime.now(timezone.utc)
+    tracking_batch = []
+    for i, spec in enumerate(gov_vehicles):
+        if await db.vehicles.count_documents({"government_id": spec["government_id"]}) > 0:
+            continue
+        vil = SUPPLY_VILLAGES[i]
+        depot = depot_by_id[vil["depot_id"]]
+        route = routes[i]
+        is_active = spec["status"] == "active"
+        loc_lat, loc_lon = depot["lat"], depot["lon"]
+        if is_active:
+            loc_lat = depot["lat"] + (vil["lat"] - depot["lat"]) * 0.35
+            loc_lon = depot["lon"] + (vil["lon"] - depot["lon"]) * 0.35
+        vid = str(uuid.uuid4())
+        cargo = {"food": 120, "water": 180, "medicine": 40, "fuel": 25} if is_active else None
+        assigned = None
+        if is_active:
+            assigned = {
+                "route_id": route["route_id"],
+                "path": route["path"],
+                "destination": vil["name"],
+                "village_id": vil["id"],
+                "depot_id": depot["id"],
+            }
+        vehicle = {
+            "id": vid,
+            "government_id": spec["government_id"],
+            "number": spec["government_id"],
+            "vehicle_type": spec["vehicle_type"],
+            "type": spec["vehicle_type"].upper(),
+            "department": spec["department"],
+            "lat": loc_lat,
+            "lng": loc_lon,
+            "lon": loc_lon,
+            "location": {"lat": loc_lat, "lon": loc_lon},
+            "heading": 90,
+            "speed": 32 if is_active else 0,
+            "status": spec["status"],
+            "destination": vil["name"] if is_active else "—",
+            "eta_minutes": route["eta_minutes"] if is_active else None,
+            "cargo": cargo,
+            "commodity": "FOOD" if cargo else None,
+            "assigned_route": assigned,
+            "driver": drivers[i],
+            "source": "SUPPLY_CHAIN",
+            "created_at": now.isoformat(),
+        }
+        await db.vehicles.insert_one(vehicle)
+
+        if is_active:
+            pts = _interpolate_line(depot, vil, 20)
+            for j, (plat, plon) in enumerate(pts):
+                ts = (now - timedelta(minutes=(19 - j) * 8)).isoformat()
+                tracking_batch.append({
+                    "id": str(uuid.uuid4()),
+                    "vehicle_id": vid,
+                    "government_id": spec["government_id"],
+                    "lat": plat,
+                    "lon": plon,
+                    "speed": 28 + (j % 5),
+                    "heading": 90,
+                    "timestamp": ts,
+                    "source": "SUPPLY_CHAIN",
+                })
+
+    if tracking_batch:
+        existing = await db.vehicle_tracking.count_documents({"source": "SUPPLY_CHAIN"})
+        if existing == 0:
+            await db.vehicle_tracking.insert_many(tracking_batch)
