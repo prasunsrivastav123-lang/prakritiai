@@ -117,8 +117,15 @@ export default function GisMap() {
         if (msg.commodity_routes) {
           setCommodityRoutes(prev => [...prev, ...msg.commodity_routes]);
         }
+        if (msg.depot_states) {
+          setDepots(prev => prev.map(d => ({ ...d, state: msg.depot_states[d.id] || d.state })));
+        }
         toast({ title: "⚠ Hazard Injected", description: `${hazard.hazard_type || 'Unknown'} hazard reported` });
         fetchAll();
+      }
+      else if (eventType === "village_isolated") {
+        toast({ title: "🚨 Village Isolated!", description: `Village ${msg.village_id} is completely blocked.` });
+        setVillages(prev => prev.map(v => v.id === msg.village_id ? { ...v, is_isolated: true } : v));
       }
       else if (eventType === "vehicle_location_update") {
         setPipelineVehicles(prev => prev.map(v =>

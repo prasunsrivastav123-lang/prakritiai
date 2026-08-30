@@ -718,6 +718,43 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 dem = vil.get("demand") or {}
                 for c, qty in dem.items():
                     demand[(vil["id"], c)] = float(qty)
+            
+            from ml.pipeline.resilience import count_blocked_routes, calculate_weighted_priority, calculate_depot_state, calculate_effective_inventory
+            all_routes = await db.supply_routes.find({"active": {"$ne": False}}, {"_id": 0}).to_list(1000)
+            blocked_docs = await db.road_blocks.find({"blocked": True}, {"_id": 0}).to_list(1000)
+            blocked_edges = [b["edge_id"] for b in blocked_docs]
+            if edge_id not in blocked_edges:
+                blocked_edges.append(edge_id)
+
+            depot_states = {}
+            for d in depots:
+                d_id = d["id"]
+                d_state = calculate_depot_state(d_id, all_routes, blocked_edges)
+                depot_states[d_id] = d_state.name
+                eff_inv = calculate_effective_inventory(d.get("inventory") or {}, d_state)
+                for c, qty in eff_inv.items():
+                    inventory[(d_id, c)] = float(qty)
+
+            isolated_villages = []
+            for vil in villages:
+                v_id = vil["id"]
+                v_routes = [r for r in all_routes if r.get("village_id") == v_id]
+                if v_routes:
+                    b_count = count_blocked_routes(v_id, all_routes, blocked_edges)
+                    if b_count == len(v_routes):
+                        isolated_villages.append(v_id)
+                        pop = vil.get("population", 1000)
+                        weighted_commodities = {}
+                        for c in commodities:
+                            weighted_commodities[c] = calculate_weighted_priority(c, pop, 24.0, 0.8)
+                        
+                        await manager.broadcast({
+                            "event": "village_isolated",
+                            "village_id": v_id,
+                            "status": "ISOLATED",
+                            "weighted_commodities": weighted_commodities,
+                            "delivery_options": ["airdrop", "helicopter", "drone"]
+                        })
 
             feasible = {}
             cost = {}
@@ -841,6 +878,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "allocation": allocation_out,
         "affected_vehicles": affected_vehicles,
         "commodity_routes": commodity_routes,
+        "depot_states": depot_states,
     }
     await manager.broadcast(ws_payload)
 
@@ -862,6 +900,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
         "estimated_cost": estimated_cost,
         "vehicles_rerouted": rerouted,
         "commodity_routes": commodity_routes,
+        "depot_states": depot_states,
     }
 
 
@@ -899,13 +938,28 @@ async def ai_predict(req: AIPredictRequest):
     matched_edge_id = match["edge_id"] if match else None
 
     affected_routes = []
+    route_criticality = "normal"
+    sole_route_alert = None
+    threshold = 0.7
+
     if matched_edge_id:
         affected_routes = await db.supply_routes.find(
             {"path": matched_edge_id},
             {"_id": 0},
         ).to_list(200)
 
-    pre_positioning_recommended = peak > 0.7
+        # EC1 SOLE ROUTE
+        from ml.pipeline.resilience import check_sole_route, RISK_THRESHOLDS
+        all_routes = await db.supply_routes.find({"active": {"$ne": False}}, {"_id": 0}).to_list(1000)
+        for route in affected_routes:
+            vid = route.get("village_id")
+            if vid and check_sole_route(vid, all_routes):
+                route_criticality = "sole_route"
+                threshold = RISK_THRESHOLDS.get("SOLE_ROUTE_THRESHOLD", 0.5)
+                sole_route_alert = f"CRITICAL: ONLY route to {vid}. Pre-positioning URGENT."
+                break
+
+    pre_positioning_recommended = peak > threshold
     pre_positioning_plan = None
     cost_comparison = None
 
@@ -945,9 +999,11 @@ async def ai_predict(req: AIPredictRequest):
         "pre_positioning_recommended": pre_positioning_recommended,
         "pre_positioning_plan": pre_positioning_plan,
         "cost_comparison": cost_comparison,
+        "route_criticality": route_criticality,
+        "sole_route_alert": sole_route_alert,
     }
 
-    if risk_level in ("high", "critical"):
+    if risk_level in ("high", "critical") or pre_positioning_recommended:
         await manager.broadcast({
             "event": "ai_prediction",
             "lat": req.lat,
@@ -958,6 +1014,8 @@ async def ai_predict(req: AIPredictRequest):
             "pre_positioning_recommended": pre_positioning_recommended,
             "pre_positioning_plan": pre_positioning_plan,
             "cost_comparison": cost_comparison,
+            "route_criticality": route_criticality,
+            "sole_route_alert": sole_route_alert,
         })
 
     return result
