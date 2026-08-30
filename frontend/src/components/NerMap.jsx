@@ -1,16 +1,36 @@
 import { useEffect, useRef } from "react";
-import { Map as MLMap, NavigationControl, Marker } from "maplibre-gl";
+import { Map as MLMap, NavigationControl, Marker, Popup } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 export const STATUS_COLORS = {
   OPEN: "#1E8E3E",
   AT_RISK: "#C77C00",
   RESTRICTED: "#D9622B",
-  BLOCKED: "#C4281C",
+  BLOCKED: "#DC2626",
   GOVERNMENT_CLOSED: "#8A1512",
   UNKNOWN: "#8A9099",
   LOCAL: "#64748B",
+  ALT_ROUTE: "#16A34A",
+  PRE_POS: "#9333EA",
 };
+
+export const HAZARD_COLORS = {
+  FLOOD_GOV: "#2563EB",
+  FLOOD_AI: "#06B6D4",
+  LANDSLIDE_GOV: "#EA580C",
+  LANDSLIDE_AI: "#EAB308",
+};
+
+// Safe coordinate helper — prevents NaN crashes
+const getCoords = (item) => {
+  if (!item) return null;
+  const lat = parseFloat(item.lat ?? item.latitude ?? item.Latitude);
+  const lon = parseFloat(item.lon ?? item.lng ?? item.longitude ?? item.Longitude);
+  if (isNaN(lat) || isNaN(lon) || lat === null || lon === null) return null;
+  return [lon, lat];
+};
+
+const safeUpper = (s) => (s ? String(s).toUpperCase() : "UNKNOWN");
 
 const baseStyle = {
   version: 8,
@@ -38,289 +58,351 @@ const baseStyle = {
   ],
 };
 
-function vehicleColor(risk) {
-  if (risk >= 60) return STATUS_COLORS.BLOCKED;
-  if (risk >= 30) return STATUS_COLORS.AT_RISK;
-  return STATUS_COLORS.OPEN;
-}
-
-function circlePolygon(lng, lat, radiusKm, points = 72) {
+function createCircleCoordinates(lng, lat, radiusMeters, points = 64) {
+  if (isNaN(lng) || isNaN(lat) || lng === null || lat === null || lng === undefined || lat === undefined) {
+    return [[[0, 0], [0, 0], [0, 0], [0, 0]]];
+  }
   const coords = [];
+  const km = radiusMeters / 1000;
   for (let i = 0; i <= points; i++) {
     const angle = (i / points) * 2 * Math.PI;
-    const dx = radiusKm * Math.cos(angle);
-    const dy = radiusKm * Math.sin(angle);
+    const dx = km * Math.cos(angle);
+    const dy = km * Math.sin(angle);
     coords.push([lng + dx / (111.32 * Math.cos((lat * Math.PI) / 180)), lat + dy / 110.574]);
   }
-  return { type: "Feature", geometry: { type: "Polygon", coordinates: [coords] }, properties: {} };
+  return [coords];
 }
 
-export default function NerMap({ roads, vehicles, incidents, layers = {}, onRoadClick, center, zoom, route, zones, environment, endpoints, isDroppingPin, onMapClick }) {
+export default function NerMap({
+  roads,
+  vehicles = [],
+  hazards = [],
+  blockedEdges = [],
+  alternativeRoutes = [],
+  prePositioningRoutes = [],
+  depots = [],
+  villages = [],
+  trafficOverlay = [],
+  layers: layerProps = { roads: true, vehicles: true, incidents: true, traffic: false },
+  onRoadClick,
+  center,
+  zoom,
+  isDroppingPin,
+  onMapClick,
+  temporaryPin,
+  zones,
+  environment,
+  incidents,
+}) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const loadedRef = useRef(false);
-  const roadsRef = useRef(null);
-  const routeRef = useRef(null);
-  const zonesRef = useRef(null);
-  const envRef = useRef(null);
-  const vehMarkersRef = useRef([]);
-  const incMarkersRef = useRef([]);
-  const envMarkersRef = useRef([]);
-  const endMarkersRef = useRef([]);
-  const lastFitRef = useRef("");
-  const clickRef = useRef(null);
-  clickRef.current = onRoadClick;
-  const mapClickRef = useRef(null);
-  mapClickRef.current = onMapClick;
 
+  const layers = layerProps || { roads: true, vehicles: true, incidents: true, traffic: false };
+
+  // DEBUG: shows if NerMap is mounting and what data it receives
+  console.log("NerMap render", {
+    hasContainer: !!containerRef.current,
+    hasRoads: !!roads,
+    vehiclesCount: vehicles?.length || 0,
+    depotsCount: depots?.length || 0,
+    villagesCount: villages?.length || 0,
+    hazardsCount: hazards?.length || 0,
+  });
+
+  const markersRef = useRef({
+    vehicles: [],
+    hazards: [],
+    depots: [],
+    villages: [],
+    tempPin: null
+  });
+
+  // Map initialization — runs once on mount
   useEffect(() => {
-    const map = new MLMap({
-      container: containerRef.current,
-      style: baseStyle,
-      center: center || [92.9, 25.8],
-      zoom: zoom || 6.2,
-      attributionControl: { compact: true },
-    });
-    map.addControl(new NavigationControl({ showCompass: false }), "bottom-right");
-    map.on("load", () => {
-      loadedRef.current = true;
-      map.addSource("roads", { type: "geojson", data: roadsRef.current || { type: "FeatureCollection", features: [] } });
-      map.addSource("route", { type: "geojson", data: routeRef.current || { type: "FeatureCollection", features: [] } });
-      map.addSource("zones", { type: "geojson", data: zonesRef.current || { type: "FeatureCollection", features: [] } });
-      map.addSource("env", { type: "geojson", data: envRef.current || { type: "FeatureCollection", features: [] } });
-      map.addLayer({
-        id: "env-rain-fill", type: "fill", source: "env",
-        paint: { "fill-color": "#2563EB", "fill-opacity": 0.12 },
+    if (!containerRef.current) {
+      console.error("NerMap: container ref is null!");
+      return;
+    }
+
+    const safeCenter = (center && !isNaN(center[0]) && !isNaN(center[1]))
+      ? center
+      : [91.88, 25.57];
+
+    console.log("NerMap: initializing map with center", safeCenter);
+
+    try {
+      const map = new MLMap({
+        container: containerRef.current,
+        style: baseStyle,
+        center: safeCenter,
+        zoom: zoom || 6.2,
+        attributionControl: { compact: true },
       });
-      map.addLayer({
-        id: "env-rain-line", type: "line", source: "env",
-        paint: { "line-color": "#2563EB", "line-opacity": 0.5, "line-width": 1.5, "line-dasharray": [2, 2] },
+
+      map.addControl(new NavigationControl({ showCompass: false }), "bottom-right");
+
+      map.on("load", () => {
+        console.log("NerMap: map loaded successfully");
+        loadedRef.current = true;
+
+        map.addSource("roads", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("blocked", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("alt_routes", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("pre_pos", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("hazard_zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("traffic", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+
+        map.addLayer({
+          id: "hazard-zones-fill", type: "fill", source: "hazard_zones",
+          paint: { "fill-color": ["get", "color"], "fill-opacity": 0.15 }
+        });
+        map.addLayer({
+          id: "hazard-zones-line", type: "line", source: "hazard_zones",
+          paint: { "line-color": ["get", "color"], "line-width": 1, "line-dasharray": [2, 2] }
+        });
+
+        map.addLayer({
+          id: "roads-line", type: "line", source: "roads",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": [
+              "match", ["get", "status"],
+              "OPEN", STATUS_COLORS.OPEN,
+              "AT_RISK", STATUS_COLORS.AT_RISK,
+              "RESTRICTED", STATUS_COLORS.RESTRICTED,
+              "BLOCKED", STATUS_COLORS.BLOCKED,
+              "GOVERNMENT_CLOSED", STATUS_COLORS.GOVERNMENT_CLOSED,
+              STATUS_COLORS.UNKNOWN,
+            ],
+            "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 10, 4.5],
+            "line-opacity": 0.8,
+          },
+        });
+
+        map.addLayer({
+          id: "blocked-line", type: "line", source: "blocked",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": STATUS_COLORS.BLOCKED, "line-width": 5, "line-opacity": 0.9 }
+        });
+
+        map.addLayer({
+          id: "alt-routes-line", type: "line", source: "alt_routes",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": STATUS_COLORS.ALT_ROUTE, "line-width": 4, "line-opacity": 0.9 }
+        });
+
+        map.addLayer({
+          id: "pre-pos-line", type: "line", source: "pre_pos",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": STATUS_COLORS.PRE_POS, "line-width": 3, "line-dasharray": [2, 1], "line-opacity": 0.8 }
+        });
+
+        map.addLayer({
+          id: "traffic-line", type: "line", source: "traffic",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": ["interpolate", ["linear"], ["zoom"], 5, 3, 10, 6],
+            "line-opacity": 0.6
+          }
+        });
+
+        map.on("click", "roads-line", (e) => {
+          if (onRoadClick && e.features && e.features[0]) onRoadClick(e.features[0].properties);
+        });
+        map.on("mouseenter", "roads-line", () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", "roads-line", () => { map.getCanvas().style.cursor = ""; });
+
+        map.on("click", (e) => {
+          if (isDroppingPin && onMapClick) {
+            onMapClick({ lat: e.lngLat.lat, lon: e.lngLat.lng });
+          }
+        });
       });
-      map.addLayer({
-        id: "zones-fill", type: "fill", source: "zones",
-        paint: { "fill-color": "#C4281C", "fill-opacity": 0.10 },
+
+      map.on("error", (e) => {
+        console.error("NerMap: maplibre error", e);
       });
-      map.addLayer({
-        id: "zones-line", type: "line", source: "zones",
-        paint: { "line-color": "#C4281C", "line-opacity": 0.6, "line-width": 1.5, "line-dasharray": [3, 2] },
-      });
-      map.addLayer({
-        id: "route-casing",
-        type: "line",
-        source: "route",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#FFFFFF", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 7, 10, 13], "line-opacity": 0.95 },
-      });
-      map.addLayer({
-        id: "route-line",
-        type: "line",
-        source: "route",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": [
-            "match", ["get", "status"],
-            "BLOCKED", STATUS_COLORS.BLOCKED,
-            "GOVERNMENT_CLOSED", STATUS_COLORS.GOVERNMENT_CLOSED,
-            "AT_RISK", STATUS_COLORS.AT_RISK,
-            "RESTRICTED", STATUS_COLORS.RESTRICTED,
-            "LOCAL", STATUS_COLORS.LOCAL,
-            "#1A73E8",
-          ],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 4, 10, 8],
-          "line-opacity": 1,
-        },
-      });
-      map.addLayer({
-        id: "roads-casing",
-        type: "line",
-        source: "roads",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#FFFFFF",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 4, 10, 9],
-          "line-opacity": 0.9,
-        },
-      });
-      map.addLayer({
-        id: "roads-line",
-        type: "line",
-        source: "roads",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": [
-            "match", ["get", "status"],
-            "OPEN", STATUS_COLORS.OPEN,
-            "AT_RISK", STATUS_COLORS.AT_RISK,
-            "RESTRICTED", STATUS_COLORS.RESTRICTED,
-            "BLOCKED", STATUS_COLORS.BLOCKED,
-            "GOVERNMENT_CLOSED", STATUS_COLORS.GOVERNMENT_CLOSED,
-            STATUS_COLORS.UNKNOWN,
-          ],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2.2, 10, 5.5],
-          "line-opacity": 0.95,
-        },
-      });
-      map.on("click", "roads-line", (e) => {
-        const f = e.features && e.features[0];
-        if (f && clickRef.current) clickRef.current(f.properties);
-      });
-      map.on("mouseenter", "roads-line", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "roads-line", () => { map.getCanvas().style.cursor = ""; });
-    });
-    mapRef.current = map;
-    return () => map.remove();
+
+      mapRef.current = map;
+
+      return () => {
+        console.log("NerMap: cleaning up map");
+        map.remove();
+      };
+    } catch (err) {
+      console.error("NerMap: FAILED to initialize map", err);
+    }
   }, []);
 
+  // Update Sources
   useEffect(() => {
     const map = mapRef.current;
-    if (map && loadedRef.current && center) map.jumpTo({ center, zoom: zoom ?? map.getZoom() });
-  }, [center, zoom]);
+    if (!map || !loadedRef.current) return;
+
+    try {
+      if (roads) map.getSource("roads").setData(roads);
+
+      const blockedFC = {
+        type: "FeatureCollection",
+        features: (blockedEdges || []).filter(e => e && (e.matched_road_geometry || e.geometry)).map(e => ({
+          type: "Feature", geometry: e.matched_road_geometry || e.geometry, properties: e
+        }))
+      };
+      map.getSource("blocked").setData(blockedFC);
+
+      const altFC = {
+        type: "FeatureCollection",
+        features: (alternativeRoutes || []).filter(r => r && r.geometry).map(r => ({
+          type: "Feature", geometry: r.geometry, properties: r
+        }))
+      };
+      map.getSource("alt_routes").setData(altFC);
+
+      const prePosFC = {
+        type: "FeatureCollection",
+        features: (prePositioningRoutes || []).filter(r => r && r.geometry).map(r => ({
+          type: "Feature", geometry: r.geometry, properties: r
+        }))
+      };
+      map.getSource("pre_pos").setData(prePosFC);
+
+      const hazardZonesFC = {
+        type: "FeatureCollection",
+        features: (hazards || []).map(h => {
+          const coords = getCoords(h);
+          if (!coords) return null;
+          const colorKey = `${safeUpper(h.hazard_type)}_${safeUpper(h.source)}`;
+          return {
+            type: "Feature",
+            geometry: { type: "Polygon", coordinates: createCircleCoordinates(coords[0], coords[1], h.hazard_radius_m || 500) },
+            properties: { color: HAZARD_COLORS[colorKey] || "#888" }
+          };
+        }).filter(f => f !== null)
+      };
+      map.getSource("hazard_zones").setData(hazardZonesFC);
+
+      if (layers.traffic) {
+        const trafficFC = {
+          type: "FeatureCollection",
+          features: (trafficOverlay || []).filter(t => t && t.geometry).map(t => ({
+            type: "Feature", geometry: t.geometry,
+            properties: { color: t.speed > 40 ? "#16A34A" : t.speed > 20 ? "#EAB308" : "#DC2626" }
+          }))
+        };
+        map.getSource("traffic").setData(trafficFC);
+      } else {
+        map.getSource("traffic").setData({ type: "FeatureCollection", features: [] });
+      }
+    } catch (err) {
+      console.error("NerMap: error updating sources", err);
+    }
+  }, [roads, blockedEdges, alternativeRoutes, prePositioningRoutes, hazards, trafficOverlay, layers.traffic]);
+
+  // Update Markers — ALL with NaN guards
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+
+    try {
+      Object.values(markersRef.current).forEach(m => {
+        if (Array.isArray(m)) m.forEach(x => x && x.remove && x.remove());
+        else if (m) m.remove && m.remove();
+      });
+      markersRef.current = { vehicles: [], hazards: [], depots: [], villages: [], tempPin: null };
+
+      if (layers.vehicles) {
+        (vehicles || []).forEach(v => {
+          const coords = getCoords(v);
+          if (!coords) return;
+
+          const el = document.createElement("div");
+          el.className = "vehicle-marker";
+          const vType = (v.type || v.vehicle_type || "truck").toLowerCase();
+          const color = vType === "ambulance" ? "#DC2626" : vType === "truck" ? "#2563EB" : vType.includes("supply") ? "#16A34A" : "#EA580C";
+          el.style.cssText = `width:24px;height:24px;background:${color};border-radius:4px;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,0.3);cursor:pointer;`;
+          el.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M12 2v20M2 12h20"/></svg>`;
+
+          const govId = v.gov_id || v.government_id || v.id || "Unknown";
+          const speed = v.speed || v.speed_kmh || 0;
+
+          const marker = new Marker({ element: el }).setLngLat(coords).addTo(map);
+          marker.getElement().addEventListener('click', () => {
+            new Popup().setLngLat(coords)
+              .setHTML(`<div class="p-2"><strong>${govId}</strong><br/>${vType}<br/>Speed: ${speed}km/h</div>`)
+              .addTo(map);
+          });
+          markersRef.current.vehicles.push(marker);
+        });
+      }
+
+      (hazards || []).forEach(h => {
+        const coords = getCoords(h);
+        if (!coords) return;
+
+        const el = document.createElement("div");
+        const colorKey = `${safeUpper(h.hazard_type)}_${safeUpper(h.source)}`;
+        const color = HAZARD_COLORS[colorKey] || "#888";
+        const isAI = h.source && (h.source.toLowerCase() === 'ai_prediction' || h.source.toLowerCase() === 'ai');
+        el.style.cssText = `width:16px;height:16px;background:${color};border:2px solid #fff;transform:rotate(45deg);border-radius:2px;box-shadow:0 2px 4px rgba(0,0,0,0.3);${isAI ? 'border-style:dashed;' : ''}`;
+        markersRef.current.hazards.push(new Marker({ element: el }).setLngLat(coords).addTo(map));
+      });
+
+      (depots || []).forEach(d => {
+        const coords = getCoords(d);
+        if (!coords) return;
+        const el = document.createElement("div");
+        el.style.cssText = "width:14px;height:14px;background:#1E40AF;border:2px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.3);";
+        markersRef.current.depots.push(new Marker({ element: el }).setLngLat(coords).addTo(map));
+      });
+
+      (villages || []).forEach(v => {
+        const coords = getCoords(v);
+        if (!coords) return;
+        const el = document.createElement("div");
+        el.style.cssText = "width:12px;height:12px;background:#15803D;border-radius:50%;border:2px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.3);";
+        markersRef.current.villages.push(new Marker({ element: el }).setLngLat(coords).addTo(map));
+      });
+
+      if (temporaryPin) {
+        const coords = getCoords(temporaryPin);
+        if (coords) {
+          const el = document.createElement("div");
+          el.style.cssText = "width:20px;height:20px;color:#2563EB;";
+          el.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>`;
+          markersRef.current.tempPin = new Marker({ element: el }).setLngLat(coords).addTo(map);
+        }
+      }
+    } catch (err) {
+      console.error("NerMap: error updating markers", err);
+    }
+  }, [vehicles, hazards, depots, villages, temporaryPin, layers.vehicles]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    map.getCanvas().style.cursor = isDroppingPin ? "crosshair" : "";
-    const handler = (e) => {
-      // Don't trigger if they clicked a road (handled elsewhere)
-      if (isDroppingPin && mapClickRef.current) {
-        mapClickRef.current({ lat: e.lngLat.lat, lon: e.lngLat.lng });
-      }
-    };
-    if (isDroppingPin) map.on("click", handler);
-    return () => { if (isDroppingPin) map.off("click", handler); };
+    if (mapRef.current) {
+      mapRef.current.getCanvas().style.cursor = isDroppingPin ? "crosshair" : "";
+    }
   }, [isDroppingPin]);
 
-  useEffect(() => {
-    roadsRef.current = roads;
-    const map = mapRef.current;
-    if (!map || !loadedRef.current || !roads) return;
-    const src = map.getSource("roads");
-    if (src) src.setData(roads);
-  }, [roads]);
+  return (
+    <div className="relative w-full h-full" style={{ minHeight: '400px' }} data-testid="neris-map">
+      <div ref={containerRef} className="absolute inset-0" style={{ height: "100%", width: "100%" }} />
 
-  useEffect(() => {
-    routeRef.current = route;
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    const src = map.getSource("route");
-    if (src) src.setData(route || { type: "FeatureCollection", features: [] });
-    // Auto-frame the route when a new one is drawn
-    if (route && route.features.length > 0) {
-      const coords = route.features.flatMap((f) => f.geometry.coordinates);
-      const sig = coords.length ? `${coords[0][0].toFixed(3)},${coords[coords.length - 1][0].toFixed(3)},${route.features.length}` : "";
-      if (sig && sig !== lastFitRef.current) {
-        lastFitRef.current = sig;
-        const lngs = coords.map((c) => c[0]);
-        const lats = coords.map((c) => c[1]);
-        map.fitBounds(
-          [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
-          { padding: 70, duration: 800, maxZoom: 11 }
-        );
-      }
-    }
-  }, [route]);
-
-  useEffect(() => {
-    const fc = { type: "FeatureCollection", features: (zones || []).map((z) => circlePolygon(z.lng, z.lat, z.radius_km)) };
-    zonesRef.current = fc;
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    const src = map.getSource("zones");
-    if (src) src.setData(fc);
-  }, [zones]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const rain = (environment?.rain || []).map((r) => ({
-      ...circlePolygon(r.lng, r.lat, r.radius_km),
-      properties: { kind: "RAIN", name: r.name },
-    }));
-    const fc = { type: "FeatureCollection", features: rain };
-    envRef.current = fc;
-    if (map && loadedRef.current) {
-      const src = map.getSource("env");
-      if (src) src.setData(fc);
-    }
-    if (!map) return;
-    envMarkersRef.current.forEach((m) => m.remove());
-    envMarkersRef.current = [];
-    (environment?.rain || []).forEach((r) => {
-      const el = document.createElement("div");
-      el.setAttribute("data-testid", `map-rain-${r.id}`);
-      el.style.cssText = "padding:2px 7px;border-radius:999px;background:#2563EB;color:#fff;font-size:10px;font-weight:600;font-family:'IBM Plex Mono',monospace;box-shadow:0 1px 4px rgba(0,0,0,.3);display:flex;align-items:center;gap:4px;white-space:nowrap;";
-      el.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></svg>${r.intensity_mm_h} mm/h`;
-      el.title = `${r.name} · ${r.level}`;
-      envMarkersRef.current.push(new Marker({ element: el }).setLngLat([r.lng, r.lat]).addTo(map));
-    });
-    (environment?.landslides || []).forEach((l) => {
-      const el = document.createElement("div");
-      el.setAttribute("data-testid", `map-landslide-${l.id}`);
-      const c = l.probability >= 0.7 ? "#C4281C" : l.probability >= 0.6 ? "#D9622B" : "#C77C00";
-      el.style.cssText = `width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:14px solid ${c};filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));cursor:pointer;`;
-      el.title = `${l.name} · ${l.slide_type.replace("_", " ")} · ${Math.round(l.probability * 100)}%`;
-      envMarkersRef.current.push(new Marker({ element: el }).setLngLat([l.lng, l.lat]).addTo(map));
-    });
-  }, [environment]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    endMarkersRef.current.forEach((m) => m.remove());
-    endMarkersRef.current = [];
-    (endpoints || []).forEach((p, i) => {
-      const el = document.createElement("div");
-      el.setAttribute("data-testid", `map-endpoint-${p.label}`);
-      const color = i === 0 ? "#1E8E3E" : "#C4281C";
-      el.style.cssText = `width:24px;height:24px;border-radius:9999px 9999px 9999px 0;transform:rotate(-45deg);background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;`;
-      el.innerHTML = `<span style="transform:rotate(45deg);color:#fff;font-size:11px;font-weight:700;">${p.label}</span>`;
-      endMarkersRef.current.push(new Marker({ element: el, anchor: "bottom" }).setLngLat([p.lng, p.lat]).addTo(map));
-    });
-  }, [endpoints]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    if (map.getLayer("roads-casing")) {
-      const v = layers.roads ? "visible" : "none";
-      map.setLayoutProperty("roads-casing", "visibility", v);
-      map.setLayoutProperty("roads-line", "visibility", v);
-    }
-  }, [layers.roads]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    vehMarkersRef.current.forEach((m) => m.remove());
-    vehMarkersRef.current = [];
-    if (!layers.vehicles || !vehicles) return;
-    vehicles.forEach((v) => {
-      const el = document.createElement("div");
-      el.setAttribute("data-testid", `map-vehicle-${v.id}`);
-      el.style.cssText = `width:20px;height:20px;border-radius:9999px;background:${vehicleColor(v.risk)};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;cursor:pointer;`;
-      el.innerHTML = `<div style="width:2.5px;height:9px;background:#fff;border-radius:2px;transform:rotate(${v.heading || 0}deg)"></div>`;
-      el.title = `${v.number} · ${v.type} · risk ${v.risk}`;
-      const m = new Marker({ element: el }).setLngLat([v.lng, v.lat]).addTo(map);
-      vehMarkersRef.current.push(m);
-    });
-  }, [vehicles, layers.vehicles]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    incMarkersRef.current.forEach((m) => m.remove());
-    incMarkersRef.current = [];
-    if (!layers.incidents || !incidents) return;
-    incidents.forEach((i) => {
-      const el = document.createElement("div");
-      el.setAttribute("data-testid", `map-incident-${i.id}`);
-      el.style.cssText = `width:15px;height:15px;background:${SEVERITY[i.severity] || "#8A9099"};border:2px solid #fff;transform:rotate(45deg);border-radius:3px;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer;`;
-      el.title = `${i.id} · ${i.title}`;
-      const m = new Marker({ element: el }).setLngLat([i.lng, i.lat]).addTo(map);
-      incMarkersRef.current.push(m);
-    });
-  }, [incidents, layers.incidents]);
-
-  return <div ref={containerRef} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }} data-testid="neris-map" />;
+      <div className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-sm border rounded-lg p-3 shadow-sm text-[10px] space-y-2 pointer-events-none" data-testid="map-legend">
+        <div className="font-bold uppercase tracking-wider text-neutral-500 mb-1">Legend</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm" style={{ background: STATUS_COLORS.BLOCKED }} /><span>Blocked Road</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-[2px]" style={{ background: STATUS_COLORS.ALT_ROUTE }} /><span>Alt Route</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-[2px] border-b-2 border-dashed" style={{ borderColor: STATUS_COLORS.PRE_POS }} /><span>Pre-pos Plan</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-blue-600" /><span>Flood (Gov)</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-cyan-400 border border-dashed border-white" /><span>Flood (AI)</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-orange-600" /><span>Landslide (Gov)</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-yellow-500 border border-dashed border-white" /><span>Landslide (AI)</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-900" /><span>Depot</span></div>
+          <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-green-700" /><span>Village</span></div>
+        </div>
+      </div>
+    </div>
+  );
 }
-
-const SEVERITY = { INFO: "#4C7EA8", WARNING: "#C77C00", HIGH: "#D9622B", CRITICAL: "#C4281C" };
