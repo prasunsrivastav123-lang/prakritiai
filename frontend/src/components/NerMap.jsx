@@ -385,16 +385,39 @@ export default function NerMap({
         const coords = getCoords(d);
         if (!coords) return;
         const el = document.createElement("div");
-        el.style.cssText = "width:14px;height:14px;background:#1E40AF;border:2px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.3);";
-        markersRef.current.depots.push(new Marker({ element: el }).setLngLat(coords).addTo(map));
+        let color = "#1E40AF"; // OPERATIONAL (blue)
+        if (d.state === "DEGRADED") color = "#EAB308"; // yellow
+        else if (d.state === "PARTIALLY_UNAVAILABLE") color = "#EA580C"; // orange
+        else if (d.state === "UNAVAILABLE") color = "#DC2626"; // red
+        el.style.cssText = `width:14px;height:14px;background:${color};border:2px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.3);`;
+        const marker = new Marker({ element: el }).setLngLat(coords).addTo(map);
+        marker.getElement().addEventListener('click', () => {
+          new Popup().setLngLat(coords)
+            .setHTML(`<div class="p-2"><strong>${d.id}</strong><br/>State: ${d.state || 'OPERATIONAL'}</div>`)
+            .addTo(map);
+        });
+        markersRef.current.depots.push(marker);
       });
 
       (villages || []).forEach(v => {
         const coords = getCoords(v);
         if (!coords) return;
         const el = document.createElement("div");
-        el.style.cssText = "width:12px;height:12px;background:#15803D;border-radius:50%;border:2px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.3);";
-        markersRef.current.villages.push(new Marker({ element: el }).setLngLat(coords).addTo(map));
+        let css = "width:12px;height:12px;background:#15803D;border-radius:50%;border:2px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.3);";
+        if (v.is_isolated) {
+            css = "width:14px;height:14px;background:#991B1B;border-radius:50%;border:2px solid #fff;box-shadow: 0 0 0 4px rgba(153,27,27,0.3); animation: pulse 1.5s infinite;";
+            // Assuming pulse animation is in global css or not, we can add a style block
+        }
+        el.style.cssText = css;
+        const marker = new Marker({ element: el }).setLngLat(coords).addTo(map);
+        if (v.is_isolated) {
+            marker.getElement().addEventListener('click', () => {
+                new Popup().setLngLat(coords)
+                  .setHTML(`<div class="p-2"><strong>${v.id}</strong><br/><span style="color:red;font-weight:bold;">ISOLATED</span><br/>Airdrop Required</div>`)
+                  .addTo(map);
+            });
+        }
+        markersRef.current.villages.push(marker);
       });
 
       if (temporaryPin) {

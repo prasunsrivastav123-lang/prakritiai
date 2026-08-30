@@ -137,11 +137,17 @@ export default function PrePositioningPanel({ onPrediction }) {
           <div className="space-y-4">
             {/* Probability — uses ACTUAL API fields */}
             <div className="space-y-2">
+              {prediction.route_criticality === "sole_route" && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-[11px] p-2 rounded flex items-start gap-2">
+                  <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span className="font-semibold">{prediction.sole_route_alert}</span>
+                </div>
+              )}
               <div className="flex justify-between items-end">
                 <span className="text-[11px] font-medium text-neutral-500">
                   {prediction.dominant_hazard?.toUpperCase()} Probability
                 </span>
-                <Badge variant={probability > 0.7 ? "destructive" : "default"} className="text-[10px] h-4">
+                <Badge variant={probability > 0.7 || prediction.route_criticality === "sole_route" ? "destructive" : "default"} className="text-[10px] h-4">
                   {(probability * 100).toFixed(0)}% {prediction.risk_level}
                 </Badge>
               </div>
