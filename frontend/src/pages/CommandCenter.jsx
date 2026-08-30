@@ -10,6 +10,8 @@ import RoadControlDrawer from "@/components/RoadControlDrawer";
 import EmergencyBanner from "@/components/EmergencyBanner";
 import EmergencyZoneModal from "@/components/EmergencyZoneModal";
 import EscalationsPanel from "@/components/EscalationsPanel";
+import ReplanPanel from "@/components/ReplanPanel";
+import PipelineStatusWidget from "@/components/PipelineStatusWidget";
 import { useAuth } from "@/context/AuthContext";
 import {
   Mountain, CloudRain, Wrench, Car, CloudLightning, HelpCircle,
@@ -133,6 +135,9 @@ export default function CommandCenter() {
                 <AlertOctagon size={13} /> Declare Emergency
               </button>
             )}
+            <div className="pointer-events-auto">
+              <PipelineStatusWidget />
+            </div>
           </div>
           <div className="flex items-center gap-2 text-[12px]" data-testid="cc-live-indicator">
             {connected ? (
@@ -208,6 +213,10 @@ export default function CommandCenter() {
             )}
 
             {/* Layer toggles */}
+            <div className="absolute top-3 left-3 z-10 pointer-events-none">
+              <ReplanPanel />
+            </div>
+
             <div className="absolute top-3 right-3 bg-white border hairline rounded-md shadow-sm p-2.5 w-44 z-10" data-testid="cc-layer-control">
               <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">
                 <Layers size={12} /> Layers
