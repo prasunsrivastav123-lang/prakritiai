@@ -118,7 +118,7 @@ export default function LogisticsWorkspace() {
   ] : [];
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="logistics-page">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="logistics-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
         <PageHeader title="LOGISTICS WORKSPACE" chip="LIVE NETWORK STATE">
@@ -140,18 +140,18 @@ export default function LogisticsWorkspace() {
 
         <div className="flex-shrink-0 grid grid-cols-2 md:grid-cols-4 border-b hairline bg-white" data-testid="logistics-kpis">
           {(kpis.length ? kpis : [1, 2, 3, 4]).map((k, i) => (
-            <div key={i} className={`px-5 py-3 ${i > 0 ? "border-l hairline" : ""}`}>
+            <div key={i} className={`px-4 sm:px-5 py-3 ${i > 0 ? "border-l hairline" : ""}`}>
               {kpis.length ? (
                 <>
-                  <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold">{k.label}</div>
-                  <div className="mt-1 text-xl font-semibold tabular-nums">{k.value}</div>
+                  <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold truncate">{k.label}</div>
+                  <div className="mt-1 text-lg sm:text-xl font-semibold tabular-nums">{k.value}</div>
                 </>
               ) : <div className="h-10 bg-[var(--surface-sunken)] rounded animate-pulse" />}
             </div>
           ))}
         </div>
 
-        <div className="flex-1 flex min-h-0">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-y-auto lg:overflow-hidden">
           <div className="flex-1 overflow-y-auto p-5 min-w-0 space-y-5">
             <LogisticsOptimizationPanel />
 
@@ -290,7 +290,7 @@ export default function LogisticsWorkspace() {
             </div>
           </div>
 
-          <aside className="w-80 flex-shrink-0 bg-white border-l hairline flex flex-col min-h-0" data-testid="logistics-alerts-feed">
+          <aside className="w-full lg:w-80 flex-shrink-0 bg-white border-t lg:border-t-0 lg:border-l flex flex-col min-h-[300px] lg:min-h-0" data-testid="logistics-alerts-feed">
             <div className="px-4 py-3 border-b hairline text-[11px] uppercase tracking-widest text-neutral-500 font-semibold">
               Network Alerts
             </div>

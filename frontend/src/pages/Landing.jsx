@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Route, Radar, ShieldCheck, PackageSearch, Radio, Building2 } from "lucide-react";
+import { ArrowRight, Route, Radar, ShieldCheck, PackageSearch, Radio, Building2, Menu, X } from "lucide-react";
 
 const pillars = [
   { icon: Radar, title: "Predict", body: "Flood and landslide risk modeled per-corridor before disruption strikes." },
@@ -44,11 +45,13 @@ const RegionMap = () => (
 );
 
 export default function Landing() {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-[var(--surface-base)]">
       {/* Top bar */}
-      <header className="border-b hairline bg-white" data-testid="landing-header">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+      <header className="border-b hairline bg-white sticky top-0 z-30" data-testid="landing-header">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-sm bg-[var(--accent-primary)] flex items-center justify-center text-white">
               <Building2 size={16} strokeWidth={2} />
@@ -63,14 +66,31 @@ export default function Landing() {
             <a href="#roles" className="hover:text-[var(--accent-primary)]">For roles</a>
             <a href="#transparency" className="hover:text-[var(--accent-primary)]">Data sources</a>
           </nav>
-          <Link
-            to="/login"
-            data-testid="landing-signin-link"
-            className="text-[13px] font-medium text-[var(--accent-primary)] hover:text-[var(--accent-primary-hover)] flex items-center gap-1"
-          >
-            Sign in <ArrowRight size={14} />
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/login"
+              data-testid="landing-signin-link"
+              className="text-[13px] font-medium text-[var(--accent-primary)] hover:text-[var(--accent-primary-hover)] flex items-center gap-1"
+            >
+              Sign in <ArrowRight size={14} />
+            </Link>
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="md:hidden p-1.5 rounded-md border hairline text-neutral-700 hover:bg-neutral-100"
+              aria-label="Toggle navigation menu"
+            >
+              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          </div>
         </div>
+
+        {mobileMenuOpen && (
+          <nav className="md:hidden border-t hairline bg-white px-4 py-3 space-y-2 text-[13px] text-neutral-600">
+            <a href="#capabilities" onClick={() => setMobileMenuOpen(false)} className="block py-1.5 hover:text-[var(--accent-primary)]">Capabilities</a>
+            <a href="#roles" onClick={() => setMobileMenuOpen(false)} className="block py-1.5 hover:text-[var(--accent-primary)]">For roles</a>
+            <a href="#transparency" onClick={() => setMobileMenuOpen(false)} className="block py-1.5 hover:text-[var(--accent-primary)]">Data sources</a>
+          </nav>
+        )}
       </header>
 
       {/* Hero */}

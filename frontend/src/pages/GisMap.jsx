@@ -192,11 +192,11 @@ export default function GisMap() {
     : pipelineVehicles;
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="gis-map-page">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="gis-map-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
         <PageHeader title="GIS MAP" chip="LIVE ROAD STATE" />
-        <div className="flex-1 relative min-h-0">
+        <div className="flex-1 relative min-h-[400px] min-w-0">
           {/* ALWAYS render NerMap — no data conditional */}
           <NerMap
             roads={data?.roads}
@@ -223,7 +223,7 @@ export default function GisMap() {
           />
 
           {/* Left: Hazard Injection + Pre-positioning Panel */}
-          <div className="absolute top-3 left-3 z-10 pointer-events-auto flex flex-col gap-2 w-80 max-h-[calc(100%-100px)] overflow-y-auto">
+          <div className="absolute top-3 left-3 z-10 pointer-events-auto flex flex-col gap-2 w-80 max-w-[calc(100vw-24px)] max-h-[calc(100%-100px)] overflow-y-auto">
             <HazardInjectionPanel
               isDroppingPin={isDroppingPin}
               setIsDroppingPin={setIsDroppingPin}
@@ -233,13 +233,13 @@ export default function GisMap() {
           </div>
 
           {/* Top-right: Pipeline Status */}
-          <div className="absolute top-3 right-56 z-10 pointer-events-none">
+          <div className="absolute top-3 right-48 sm:right-56 z-10 pointer-events-none hidden sm:block">
             <PipelineStatusWidget />
           </div>
 
           {/* Layer toggles */}
-          <div className="absolute top-3 right-3 bg-white border hairline rounded-md shadow-sm p-2.5 w-44 z-10" data-testid="gis-layer-control">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">
+          <div className="absolute top-3 right-3 bg-white border hairline rounded-md shadow-sm p-2 sm:p-2.5 w-36 sm:w-44 z-10" data-testid="gis-layer-control">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-1.5">
               <Layers size={12} /> Layers
             </div>
             {[
@@ -250,7 +250,7 @@ export default function GisMap() {
               { key: "altRoutes", label: "Alt Routes" },
               { key: "traffic", label: "Traffic" },
             ].map((l) => (
-              <label key={l.key} className="flex items-center gap-2 py-1 text-[12px] text-neutral-700 cursor-pointer">
+              <label key={l.key} className="flex items-center gap-2 py-0.5 sm:py-1 text-[11px] sm:text-[12px] text-neutral-700 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={layers[l.key] ?? true}
@@ -264,15 +264,15 @@ export default function GisMap() {
           </div>
 
           {/* Legend */}
-          <div className="absolute bottom-3 left-3 bg-white/95 border hairline rounded-md shadow-sm px-3 py-2 z-10 pointer-events-auto" data-testid="gis-map-legend">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          <div className="absolute bottom-3 left-3 bg-white/95 border hairline rounded-md shadow-sm px-2.5 py-1.5 sm:px-3 sm:py-2 z-10 pointer-events-auto max-w-[calc(100vw-24px)]" data-testid="gis-map-legend">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1">
               {[
                 ["OPEN", "Open"], ["AT_RISK", "At Risk"], ["RESTRICTED", "Restricted"],
                 ["BLOCKED", "Blocked"], ["GOVERNMENT_CLOSED", "Gov Closed"], ["UNKNOWN", "Unknown"],
               ].map(([k, label]) => (
-                <div key={k} className="flex items-center gap-1.5 text-[10.5px] text-neutral-600">
-                  <span className="w-4 h-[3px] rounded-full" style={{ background: STATUS_COLORS[k] }} />
-                  {label}
+                <div key={k} className="flex items-center gap-1.5 text-[10px] sm:text-[10.5px] text-neutral-600">
+                  <span className="w-3.5 h-[3px] rounded-full flex-shrink-0" style={{ background: STATUS_COLORS[k] }} />
+                  <span className="truncate">{label}</span>
                 </div>
               ))}
             </div>

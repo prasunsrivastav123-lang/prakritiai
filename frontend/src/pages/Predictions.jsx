@@ -55,13 +55,13 @@ export default function Predictions() {
     : null;
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="predictions-page">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="predictions-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
         <PageHeader title="HAZARD PREDICTIONS" chip={data ? `${data.provenance} · ${data.model_version}` : "…"} />
 
-        <div className="flex-1 overflow-y-auto p-5">
-          <div className="flex gap-1 p-1 bg-[var(--surface-sunken)] rounded-md w-fit mb-5" data-testid="predictions-tabs">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+          <div className="flex flex-wrap gap-1 p-1 bg-[var(--surface-sunken)] rounded-md w-full sm:w-fit mb-5" data-testid="predictions-tabs">
             {[
               { key: "flood", label: "Flood Risk", icon: CloudRain },
               { key: "landslide", label: "Landslide Risk", icon: Mountain },
@@ -69,7 +69,7 @@ export default function Predictions() {
               <button
                 key={t.key}
                 onClick={() => setHazard(t.key)}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-[5px] text-[12.5px] font-medium transition-colors ${
+                className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-[5px] text-[12px] sm:text-[12.5px] font-medium transition-colors ${
                   hazard === t.key ? "bg-white shadow-sm text-[var(--text-primary)]" : "text-neutral-500"
                 }`}
                 data-testid={`predictions-tab-${t.key}`}
@@ -77,7 +77,7 @@ export default function Predictions() {
                 <t.icon size={14} /> {t.label}
               </button>
             ))}
-            <div className="w-px bg-[var(--border-default)] mx-1" />
+            <div className="hidden sm:block w-px bg-[var(--border-default)] mx-1" />
             {[
               { key: "table", label: "Table", icon: Table2 },
               { key: "map", label: "Map", icon: MapIcon },
@@ -85,7 +85,7 @@ export default function Predictions() {
               <button
                 key={t.key}
                 onClick={() => setView(t.key)}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-[5px] text-[12.5px] font-medium transition-colors ${
+                className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-[5px] text-[12px] sm:text-[12.5px] font-medium transition-colors ${
                   view === t.key ? "bg-white shadow-sm text-[var(--text-primary)]" : "text-neutral-500"
                 }`}
                 data-testid={`predictions-view-${t.key}`}
@@ -96,7 +96,7 @@ export default function Predictions() {
           </div>
 
           {view === "map" && (
-            <div className="border hairline rounded-md overflow-hidden relative h-[520px]" data-testid="predictions-map">
+            <div className="border hairline rounded-md overflow-hidden relative h-[380px] sm:h-[520px]" data-testid="predictions-map">
               {hazardRoads ? (
                 <NerMap
                   roads={hazardRoads}

@@ -66,12 +66,12 @@ export default function Vehicles() {
   );
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="vehicles-page">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="vehicles-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 flex-shrink-0 bg-white border-b hairline px-5 flex items-center justify-between">
-          <h1 className="text-[15px] font-semibold tracking-tight">FLEET TRACKING</h1>
-          <div className="flex items-center gap-2">
+        <header className="min-h-14 py-2.5 px-4 sm:px-5 flex-shrink-0 bg-white border-b hairline flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
+          <h1 className="text-[14px] sm:text-[15px] font-semibold tracking-tight">FLEET TRACKING</h1>
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
             {canAdd && (
               <button
                 onClick={() => setAddOpen(true)}
@@ -106,7 +106,7 @@ export default function Vehicles() {
           <div className="bg-red-50 border-b border-red-200 px-5 py-2 text-[12px] text-red-800" data-testid="vehicles-error">{error}</div>
         )}
 
-        <div className="flex-1 flex min-h-0">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-y-auto lg:overflow-hidden">
           {/* Left: fleet table */}
           <div className="flex-1 overflow-auto p-5 min-w-0">
           <div className="bg-white border hairline rounded-md overflow-hidden">
@@ -182,7 +182,7 @@ export default function Vehicles() {
 
           {/* Right: live map with all truck locations — gov & field only */}
           {canSeeMap && (
-            <div className="w-[42%] flex-shrink-0 border-l hairline relative bg-[var(--surface-sunken)]" data-testid="fleet-map-pane">
+            <div className="w-full lg:w-[42%] flex-shrink-0 border-t lg:border-t-0 lg:border-l relative bg-[var(--surface-sunken)] h-[350px] lg:h-auto min-h-[300px]" data-testid="fleet-map-pane">
               {data ? (
                 <NerMap
                   roads={data.roads}
@@ -211,7 +211,7 @@ export default function Vehicles() {
       {selected && (
         <>
           <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setSelected(null)} />
-          <aside className="fixed top-0 right-0 h-full w-[420px] bg-white border-l hairline z-50 flex flex-col shadow-xl" data-testid="vehicle-drawer">
+          <aside className="fixed top-0 right-0 h-full w-full sm:w-[420px] max-w-full bg-white border-l hairline z-50 flex flex-col shadow-xl" data-testid="vehicle-drawer">
             <div className="px-5 py-4 border-b hairline flex items-center justify-between">
               <div className="text-[11px] uppercase tracking-widest text-neutral-500 font-semibold">Vehicle Detail</div>
               <button onClick={() => setSelected(null)} className="text-neutral-400 hover:text-neutral-700" data-testid="vehicle-drawer-close">

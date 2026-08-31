@@ -27,20 +27,20 @@ export default function Supply() {
   const villages = data?.villages_list || data?.villages || [];
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="supply-page">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="supply-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
         <PageHeader title="SUPPLY INTELLIGENCE" chip="DEMO DATA" />
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           <div className="text-[11px] uppercase tracking-widest text-neutral-500 font-semibold mb-3">Commodity risk</div>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4" data-testid="supply-commodity-cards">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" data-testid="supply-commodity-cards">
             {!data && [1, 2, 3, 4].map((n) => <div key={n} className="h-24 bg-white border hairline rounded-md animate-pulse" />)}
             {data && data.supply.map((s) => {
               const Icon = COMMODITY_ICONS[s.commodity] || Wheat;
               return (
-                <div key={s.commodity} className="bg-white border hairline rounded-md p-5" style={{ borderTop: `3px solid ${SEV_COLORS[s.severity]}` }} data-testid={`supply-commodity-${s.commodity.toLowerCase()}`}>
+                <div key={s.commodity} className="bg-white border hairline rounded-md p-4 sm:p-5" style={{ borderTop: `3px solid ${SEV_COLORS[s.severity]}` }} data-testid={`supply-commodity-${s.commodity.toLowerCase()}`}>
                   <div className="flex items-center gap-2.5">
-                    <span className="w-9 h-9 rounded-sm flex items-center justify-center" style={{ background: `${SEV_COLORS[s.severity]}14`, color: SEV_COLORS[s.severity] }}>
+                    <span className="w-9 h-9 rounded-sm flex items-center justify-center flex-shrink-0" style={{ background: `${SEV_COLORS[s.severity]}14`, color: SEV_COLORS[s.severity] }}>
                       <Icon size={17} strokeWidth={1.75} />
                     </span>
                     <div>
@@ -48,7 +48,7 @@ export default function Supply() {
                       <div className="text-[11px] font-semibold" style={{ color: SEV_COLORS[s.severity] }}>{s.severity}</div>
                     </div>
                     <div className="ml-auto text-right">
-                      <div className="text-2xl font-semibold tabular-nums">{s.at_risk_count}</div>
+                      <div className="text-xl sm:text-2xl font-semibold tabular-nums">{s.at_risk_count}</div>
                       <div className="text-[10px] uppercase tracking-widest text-neutral-500">at-risk</div>
                     </div>
                   </div>
@@ -58,7 +58,7 @@ export default function Supply() {
           </div>
 
           <div className="text-[11px] uppercase tracking-widest text-neutral-500 font-semibold mt-8 mb-3">Villages at isolation risk</div>
-          <div className="bg-white border hairline rounded-md overflow-hidden">
+          <div className="bg-white border hairline rounded-md overflow-x-auto">
             <table className="w-full text-[13px]" data-testid="villages-table">
               <thead>
                 <tr className="border-b hairline text-left text-[10px] uppercase tracking-widest text-neutral-500">
