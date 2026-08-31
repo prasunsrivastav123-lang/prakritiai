@@ -105,7 +105,7 @@ export default function PublicAdvisories() {
   };
 
   return (
-    <div className="min-h-screen flex bg-[var(--surface-base)]" data-testid="public-page">
+    <div className="min-h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden" data-testid="public-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
         <PageHeader title="PUBLIC ADVISORIES" chip="GOVERNMENT-VERIFIED ONLY">
@@ -134,7 +134,7 @@ export default function PublicAdvisories() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-6 max-w-5xl">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 max-w-5xl">
           <div className="p-4 border hairline rounded-md bg-white mb-6 text-[13px] text-neutral-600">
             This page shows only <span className="font-medium text-[var(--text-primary)]">government-verified</span> road status
             and verified field reports. Data refreshes automatically. Demo dataset.
@@ -146,7 +146,7 @@ export default function PublicAdvisories() {
                 <div className="text-[11px] uppercase tracking-widest text-neutral-500 font-semibold">Send a report to government</div>
                 <button type="button" onClick={() => setShowForm(false)} className="text-neutral-400 hover:text-neutral-700"><X size={14} /></button>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <select
                   value={report.type}
                   onChange={(e) => setReport((r) => ({ ...r, type: e.target.value }))}

@@ -145,19 +145,19 @@ export default function Routes() {
   const band = rr ? riskBand(rr.risk_score) : null;
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="routes-page">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="routes-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 flex-shrink-0 bg-white border-b hairline px-5 flex items-center justify-between">
-          <h1 className="text-[15px] font-semibold tracking-tight">ROUTE CALCULATION</h1>
+        <header className="min-h-14 py-2.5 px-4 sm:px-5 flex-shrink-0 bg-white border-b hairline flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
+          <h1 className="text-[14px] sm:text-[15px] font-semibold tracking-tight">ROUTE CALCULATION</h1>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border hairline text-neutral-500">LIVE ROAD STATE · DEMO ROUTING</span>
         </header>
 
         <EmergencyBanner zones={zones} />
 
-        <div className="flex-1 flex min-h-0">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-y-auto lg:overflow-hidden">
           {/* Left: form + results */}
-          <div className="w-[380px] flex-shrink-0 bg-white border-r hairline overflow-y-auto p-5 space-y-6">
+          <div className="w-full lg:w-[380px] flex-shrink-0 bg-white border-b lg:border-b-0 lg:border-r overflow-y-auto p-5 space-y-6">
             <RouteCalculationPanel />
             <hr className="border-t" />
             <form onSubmit={onSubmit} className="space-y-4" data-testid="route-form">
@@ -314,7 +314,7 @@ export default function Routes() {
           </div>
 
           {/* Right: map */}
-          <div className="flex-1 relative min-w-0">
+          <div className="flex-1 relative min-w-0 h-[380px] sm:h-[480px] lg:h-auto min-h-[300px]">
             <NerMap
               roads={roads}
               vehicles={[]}

@@ -164,7 +164,7 @@ export default function Login() {
 
             {/* Role tabs */}
             <div
-              className="grid grid-cols-4 gap-1 p-1 bg-[var(--surface-sunken)] rounded-md mb-6"
+              className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 bg-[var(--surface-sunken)] rounded-md mb-6"
               role="tablist"
               data-testid="login-role-tabs"
             >

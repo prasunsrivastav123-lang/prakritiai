@@ -120,7 +120,7 @@ export default function FieldReporting() {
   };
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="field-page">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="field-page">
       <NavRail />
       <div className="flex-1 flex flex-col min-w-0">
         <PageHeader title="FIELD REPORTING" chip="DEMO FEED">
@@ -133,8 +133,8 @@ export default function FieldReporting() {
 
         <EmergencyBanner />
 
-        <div className="flex-1 flex min-h-0">
-          <div className="w-[420px] flex-shrink-0 bg-white border-r hairline overflow-y-auto p-5">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-y-auto lg:overflow-hidden">
+          <div className="w-full lg:w-[420px] flex-shrink-0 bg-white border-b lg:border-b-0 lg:border-r overflow-y-auto p-5">
             <div className="text-[11px] uppercase tracking-widest text-neutral-500 font-semibold mb-3">New report</div>
             <form onSubmit={submit} className="space-y-4" data-testid="field-report-form">
               <div>

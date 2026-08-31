@@ -111,25 +111,25 @@ export default function CommandCenter() {
   const connected = !error;
 
   return (
-    <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="command-center">
+    <div className="min-h-screen md:h-screen flex flex-col md:flex-row bg-[var(--surface-base)] overflow-x-hidden md:overflow-hidden" data-testid="command-center">
       <NavRail />
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Page top bar */}
-        <header className="h-14 flex-shrink-0 bg-white border-b hairline px-5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-[15px] font-semibold tracking-tight" data-testid="cc-title">
+        <header className="min-h-14 py-2.5 px-4 sm:px-5 flex-shrink-0 bg-white border-b hairline flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <h1 className="text-[14px] sm:text-[15px] font-semibold tracking-tight" data-testid="cc-title">
               NER LOGISTICS INTELLIGENCE CENTER
             </h1>
-            <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full border hairline text-[10px] font-mono text-neutral-500">
+            <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border hairline text-[10px] font-mono text-neutral-500">
               DEMO DATA
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
             {isGov && (
               <button
                 onClick={() => setEmergencyOpen(true)}
-                className="h-8 px-3 rounded-md border border-[#8A1512] text-[#8A1512] hover:bg-red-50 text-[12px] font-medium flex items-center gap-1.5 transition-colors"
+                className="h-8 px-2.5 sm:px-3 rounded-md border border-[#8A1512] text-[#8A1512] hover:bg-red-50 text-[11.5px] sm:text-[12px] font-medium flex items-center gap-1.5 transition-colors"
                 data-testid="declare-emergency-button"
               >
                 <AlertOctagon size={13} /> Declare Emergency
@@ -138,24 +138,24 @@ export default function CommandCenter() {
             <div className="pointer-events-auto">
               <PipelineStatusWidget />
             </div>
-          </div>
-          <div className="flex items-center gap-2 text-[12px]" data-testid="cc-live-indicator">
-            {connected ? (
-              <>
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: "#1E8E3E" }} />
-                  <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#1E8E3E" }} />
-                </span>
-                <span className="text-neutral-600">
-                  Live · Last updated {lastFetch ? `${Math.max(0, Math.floor((now - lastFetch) / 1000))}s ago` : "—"}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="status-dot" style={{ background: "#8A9099" }} />
-                <span className="text-neutral-500">Reconnecting…</span>
-              </>
-            )}
+            <div className="flex items-center gap-1.5 text-[11px] sm:text-[12px]" data-testid="cc-live-indicator">
+              {connected ? (
+                <>
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: "#1E8E3E" }} />
+                    <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#1E8E3E" }} />
+                  </span>
+                  <span className="text-neutral-600 hidden sm:inline">
+                    Live · {lastFetch ? `${Math.max(0, Math.floor((now - lastFetch) / 1000))}s ago` : "—"}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="status-dot" style={{ background: "#8A9099" }} />
+                  <span className="text-neutral-500">Reconnecting…</span>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
@@ -169,15 +169,15 @@ export default function CommandCenter() {
         )}
 
         {/* KPI strip */}
-        <div className="flex-shrink-0 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 border-b hairline bg-white" data-testid="cc-kpi-strip">
+        <div className="flex-shrink-0 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 border-b hairline bg-white" data-testid="cc-kpi-strip">
           {KPIS.map((k, idx) => (
             <div
               key={k.key}
               data-testid={k.testId}
-              className={`px-4 py-3 ${idx > 0 ? "border-l hairline" : ""} hover:bg-[var(--surface-base)] transition-colors`}
+              className={`px-3 sm:px-4 py-2.5 sm:py-3 ${idx > 0 ? "border-l hairline" : ""} hover:bg-[var(--surface-base)] transition-colors`}
             >
               <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-semibold truncate">{k.label}</div>
-              <div className="mt-1 text-2xl font-semibold tabular-nums text-[var(--text-primary)]">
+              <div className="mt-0.5 sm:mt-1 text-xl sm:text-2xl font-semibold tabular-nums text-[var(--text-primary)]">
                 {data ? data.kpis[k.key] : <span className="inline-block w-8 h-6 bg-[var(--surface-sunken)] rounded animate-pulse" />}
               </div>
             </div>
@@ -185,9 +185,9 @@ export default function CommandCenter() {
         </div>
 
         {/* Main: map + incidents */}
-        <div className="flex-1 flex min-h-0">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-y-auto lg:overflow-hidden">
           {/* Map zone */}
-          <div className="flex-1 relative min-w-0">
+          <div className="flex-1 relative min-w-0 h-[380px] sm:h-[480px] lg:h-auto min-h-[300px]">
             {data ? (
               <NerMap
                 roads={data.roads}
@@ -213,12 +213,12 @@ export default function CommandCenter() {
             )}
 
             {/* Layer toggles */}
-            <div className="absolute top-3 left-3 z-10 pointer-events-none">
+            <div className="absolute top-3 left-3 z-10 pointer-events-none max-w-[calc(100%-120px)] sm:max-w-none">
               <ReplanPanel />
             </div>
 
-            <div className="absolute top-3 right-3 bg-white border hairline rounded-md shadow-sm p-2.5 w-44 z-10" data-testid="cc-layer-control">
-              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-2">
+            <div className="absolute top-3 right-3 bg-white border hairline rounded-md shadow-sm p-2 sm:p-2.5 w-36 sm:w-44 z-10" data-testid="cc-layer-control">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-neutral-500 font-semibold mb-1.5">
                 <Layers size={12} /> Layers
               </div>
               {[
@@ -226,7 +226,7 @@ export default function CommandCenter() {
                 ...(canSeeLiveVehicles ? [{ key: "vehicles", label: "Vehicles (live)" }] : []),
                 { key: "incidents", label: "Incidents" },
               ].map((l) => (
-                <label key={l.key} className="flex items-center gap-2 py-1 text-[12px] text-neutral-700 cursor-pointer">
+                <label key={l.key} className="flex items-center gap-2 py-0.5 sm:py-1 text-[11px] sm:text-[12px] text-neutral-700 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={layers[l.key]}
@@ -240,31 +240,31 @@ export default function CommandCenter() {
             </div>
 
             {/* Legend */}
-            <div className="absolute bottom-3 left-3 bg-white/95 border hairline rounded-md shadow-sm px-3 py-2 z-10" data-testid="cc-map-legend">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="absolute bottom-3 left-3 bg-white/95 border hairline rounded-md shadow-sm px-2.5 py-1.5 sm:px-3 sm:py-2 z-10 max-w-[calc(100%-24px)]" data-testid="cc-map-legend">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-x-3 gap-y-1">
                 {[
                   ["OPEN", "Open"], ["AT_RISK", "At Risk"], ["RESTRICTED", "Restricted"],
                   ["BLOCKED", "Blocked"], ["GOVERNMENT_CLOSED", "Gov Closed"], ["UNKNOWN", "Unknown"],
                 ].map(([k, label]) => (
-                  <div key={k} className="flex items-center gap-1.5 text-[10.5px] text-neutral-600">
-                    <span className="w-4 h-[3px] rounded-full" style={{ background: STATUS_COLORS[k] }} />
-                    {label}
+                  <div key={k} className="flex items-center gap-1.5 text-[10px] sm:text-[10.5px] text-neutral-600">
+                    <span className="w-3.5 h-[3px] rounded-full flex-shrink-0" style={{ background: STATUS_COLORS[k] }} />
+                    <span className="truncate">{label}</span>
                   </div>
                 ))}
-                <div className="flex items-center gap-1.5 text-[10.5px] text-neutral-600">
-                  <span className="w-4 h-[3px] rounded-full" style={{ background: "#2563EB" }} />
-                  Rain cell
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-[10.5px] text-neutral-600">
+                  <span className="w-3.5 h-[3px] rounded-full flex-shrink-0" style={{ background: "#2563EB" }} />
+                  <span>Rain cell</span>
                 </div>
-                <div className="flex items-center gap-1.5 text-[10.5px] text-neutral-600">
-                  <span style={{ width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderBottom: "9px solid #D9622B" }} />
-                  Landslide watch
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-[10.5px] text-neutral-600">
+                  <span style={{ width: 0, height: 0, borderLeft: "4px solid transparent", borderRight: "4px solid transparent", borderBottom: "8px solid #D9622B" }} className="flex-shrink-0" />
+                  <span>Landslide watch</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Live incidents panel */}
-          <aside className="w-80 flex-shrink-0 bg-white border-l hairline flex flex-col min-h-0" data-testid="cc-incidents-panel">
+          <aside className="w-full lg:w-80 flex-shrink-0 bg-white border-t lg:border-t-0 lg:border-l flex flex-col min-h-[300px] lg:min-h-0" data-testid="cc-incidents-panel">
             <div className="px-4 py-3 border-b hairline flex items-center justify-between">
               <div className="text-[11px] uppercase tracking-widest text-neutral-500 font-semibold">Live Incidents</div>
               {data && (
