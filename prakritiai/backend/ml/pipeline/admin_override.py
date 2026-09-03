@@ -16,7 +16,7 @@ class ManualHazardModel(BaseModel):
     lat: float = Field(..., description="Latitude of the observed landslide/flood")
     lon: float = Field(..., description="Longitude of the observed hazard")
     hazard_type: Literal["landslide", "flood", "road_damage", "closure"] = "landslide"
-    severity: Literal["low", "medium", "high"] = "high"
+    severity: Literal["low", "medium", "high", "critical"] = "high"
     notes: Optional[str] = None
 
 
@@ -72,8 +72,8 @@ async def ingest_manual_hazard(hazard: ManualHazardModel):
 
         affected_edge_id = nearest_roads.iloc[0]["edge_id"]
 
-        severity_map = {"low": 0.4, "medium": 0.7, "high": 0.95}
-        clearance_map = {"low": 2.0, "medium": 6.0, "high": 12.0}
+        severity_map = {"low": 0.4, "medium": 0.7, "high": 0.95, "critical": 1.0}
+        clearance_map = {"low": 2.0, "medium": 6.0, "high": 12.0, "critical": 9999.0}
 
         manual_event = {
             "edge_id": affected_edge_id,

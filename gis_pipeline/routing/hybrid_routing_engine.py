@@ -27,9 +27,28 @@ class OlaMapsTrafficClient:
         if edge_id in self.cache:
             return self.cache[edge_id]
         try:
-            # Mock API Call to Ola Maps
-            raise requests.exceptions.Timeout("Ola Maps API timed out.")
-        except requests.exceptions.RequestException:
+            import requests
+            if not self.api_key:
+                return None
+            
+            # Get midpoint of the road edge
+            mid_lat = (u_coords[0] + v_coords[0]) / 2.0
+            mid_lon = (u_coords[1] + v_coords[1]) / 2.0
+            url = "https://api.olamaps.com/tiles/v1/traffic"
+            params = {"lat": mid_lat, "lng": mid_lon, "api_key": self.api_key}
+            
+            resp = requests.get(url, params=params, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            traffic_level = str(data.get("traffic_level") or data.get("congestion") or "moderate").lower()
+            speed_map = {"low": 45.0, "moderate": 28.0, "heavy": 12.0}
+            speed = speed_map.get(traffic_level, 28.0)
+            
+            self.cache[edge_id] = speed
+            return speed
+        except Exception:
+            # Fails silently to trigger Topographical Fallback in the routing engine
             return None
 
 class HybridRoutingEngine:
@@ -114,10 +133,16 @@ class HybridRoutingEngine:
                 
                 # Calculate Risk / Survivability
                 p0 = float(edge_data.get("block_probability", 0.0))
-                clearance = max(float(edge_data.get("reopen_after_hours", 6.0)), 1e-3)
-                decay = 1.0 / (1.0 + math.exp(6.0 * (g - clearance) / clearance))
-                p_t = p0 * decay
-                edge_survival = 1.0 - min(p_t, 0.99)
+                is_hard_closed = edge_data.get("closed", False)
+                
+                if is_hard_closed:
+                    # Government hard-closed road. No decay, completely impassable.
+                    edge_survival = 0.0
+                else:
+                    clearance = max(float(edge_data.get("reopen_after_hours", 6.0)), 1e-3)
+                    decay = 1.0 / (1.0 + math.exp(6.0 * (g - clearance) / clearance))
+                    p_t = p0 * decay
+                    edge_survival = 1.0 - min(p_t, 0.99)
                 
                 new_surv = surv * edge_survival
                 if new_surv < min_survivability: continue

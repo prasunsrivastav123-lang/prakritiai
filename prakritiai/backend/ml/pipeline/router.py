@@ -230,7 +230,7 @@ class InjectHazardRequest(BaseModel):
     lat: float
     lon: float
     hazard_type: str = Field(..., description="flood or landslide")
-    severity: str = Field(..., description="low, medium, or high")
+    severity: str = Field(..., description="low, medium, high, or critical")
     source: str = Field(..., description="government or ai_prediction")
     notes: Optional[str] = None
 
@@ -570,8 +570,8 @@ async def get_hazards(limit: int = 10):
 async def inject_and_optimize(req: InjectHazardRequest):
     if req.hazard_type not in ("flood", "landslide"):
         raise HTTPException(status_code=400, detail="hazard_type must be flood or landslide")
-    if req.severity not in ("low", "medium", "high"):
-        raise HTTPException(status_code=400, detail="severity must be low, medium, or high")
+    if req.severity not in ("low", "medium", "high", "critical"):
+        raise HTTPException(status_code=400, detail="severity must be low, medium, high, or critical")
     if req.source not in ("government", "ai_prediction"):
         raise HTTPException(status_code=400, detail="source must be government or ai_prediction")
 
@@ -579,8 +579,8 @@ async def inject_and_optimize(req: InjectHazardRequest):
     from core.database import db
     from core.ws import manager
 
-    severity_map = {"low": 0.4, "medium": 0.7, "high": 0.95}
-    clearance_map = {"low": 2.0, "medium": 6.0, "high": 12.0}
+    severity_map = {"low": 0.4, "medium": 0.7, "high": 0.95, "critical": 1.0}
+    clearance_map = {"low": 2.0, "medium": 6.0, "high": 12.0, "critical": 9999.0}
     blockage = severity_map[req.severity]
     match = _find_nearest_edge_meta(req.lat, req.lon, max_distance_m=500)
 
@@ -740,6 +740,11 @@ async def inject_and_optimize(req: InjectHazardRequest):
                     inventory[(d["id"], c)] = float(qty)
             demand = {}
             for vil in villages:
+                # If village is evacuated, do not send supplies to a ghost town!
+                state = vil.get("village_state", "NORMAL")
+                if state in ["EVACUATED", "EVACUATING"]:
+                    continue
+                    
                 dem = vil.get("demand") or {}
                 for c, qty in dem.items():
                     demand[(vil["id"], c)] = float(qty)

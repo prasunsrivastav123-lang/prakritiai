@@ -27,45 +27,7 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * math.asin(math.sqrt(min(1.0, a)))
 
 
-def _simulate_traffic_route(
-    origin_lat: float,
-    origin_lon: float,
-    dest_lat: float,
-    dest_lon: float,
-) -> Dict[str, Any]:
-    dist_km = _haversine_km(origin_lat, origin_lon, dest_lat, dest_lon)
-    mid_lat = (origin_lat + dest_lat) / 2.0
-    mid_lon = (origin_lon + dest_lon) / 2.0
-    routes: List[Dict[str, Any]] = []
-    for i, level in enumerate(TRAFFIC_LEVELS):
-        speed = TRAFFIC_SPEED_KMPH[level]
-        detour = 1.0 + 0.08 * i
-        length = dist_km * detour
-        hours = length / max(speed, 1.0)
-        delay = TRAFFIC_DELAY_SECONDS[level]
-        jitter_lat = (random.random() - 0.5) * 0.04 * i
-        jitter_lon = (random.random() - 0.5) * 0.04 * i
-        routes.append({
-            "route_id": f"sim-{i + 1}",
-            "traffic_level": level,
-            "distance_km": round(length, 2),
-            "duration_seconds": int(hours * 3600) + delay,
-            "delay_seconds": delay,
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [
-                    [origin_lon, origin_lat],
-                    [mid_lon + jitter_lon, mid_lat + jitter_lat],
-                    [dest_lon, dest_lat],
-                ],
-            },
-        })
-    recommended = min(routes, key=lambda r: r["duration_seconds"])
-    return {
-        "routes": routes,
-        "recommended_route": recommended,
-        "source": "simulated",
-    }
+
 
 
 async def get_traffic_aware_route(
@@ -75,7 +37,7 @@ async def get_traffic_aware_route(
     dest_lon: float,
 ) -> Dict[str, Any]:
     if not OLA_API_KEY:
-        return _simulate_traffic_route(origin_lat, origin_lon, dest_lat, dest_lon)
+        raise ValueError("OLA_API_KEY is not set.")
 
     url = f"{OLA_BASE_URL}/routing/v1/directions"
     params = {
@@ -92,7 +54,7 @@ async def get_traffic_aware_route(
             data = resp.json()
         routes = _parse_ola_routes(data)
         if not routes:
-            return _simulate_traffic_route(origin_lat, origin_lon, dest_lat, dest_lon)
+            raise ValueError("No routes returned from Ola Maps.")
         recommended = min(routes, key=lambda r: r.get("duration_seconds", 10**9))
         return {
             "routes": routes,
@@ -100,8 +62,8 @@ async def get_traffic_aware_route(
             "source": "ola",
         }
     except Exception as e:
-        logger.warning("OLA routing failed, using simulator: %s", e)
-        return _simulate_traffic_route(origin_lat, origin_lon, dest_lat, dest_lon)
+        logger.warning("OLA routing failed: %s", e)
+        raise e
 
 
 def _parse_ola_routes(data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -139,14 +101,7 @@ def _parse_ola_routes(data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 async def get_traffic_at_location(lat: float, lon: float) -> Dict[str, Any]:
     if not OLA_API_KEY:
-        level = random.choice(TRAFFIC_LEVELS)
-        return {
-            "traffic_level": level,
-            "delay_seconds": TRAFFIC_DELAY_SECONDS[level],
-            "source": "simulated",
-            "lat": lat,
-            "lon": lon,
-        }
+        raise ValueError("OLA_API_KEY is not set.")
 
     url = f"{OLA_BASE_URL}/tiles/v1/traffic"
     params = {"lat": lat, "lng": lon, "api_key": OLA_API_KEY}
@@ -166,12 +121,5 @@ async def get_traffic_at_location(lat: float, lon: float) -> Dict[str, Any]:
             "lon": lon,
         }
     except Exception as e:
-        logger.warning("OLA traffic lookup failed, using simulator: %s", e)
-        level = random.choice(TRAFFIC_LEVELS)
-        return {
-            "traffic_level": level,
-            "delay_seconds": TRAFFIC_DELAY_SECONDS[level],
-            "source": "simulated",
-            "lat": lat,
-            "lon": lon,
-        }
+        logger.warning("OLA traffic lookup failed: %s", e)
+        raise e

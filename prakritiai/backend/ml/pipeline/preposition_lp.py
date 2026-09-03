@@ -21,7 +21,7 @@ def optimize_prepositioning(depots, villages, current_inventory, future_demand, 
         
     # Constraint 2: Try to meet future demand at the village
     for v in villages:
-        solver.Add(sum(x[d, v] for d in depots) <= future_demand.get(v, 0))
+        solver.Add(sum(x[d, v] for d in depots) == future_demand.get(v, 0))
         
     # Objective: Minimize cost of moving supplies early
     obj = solver.Objective()
