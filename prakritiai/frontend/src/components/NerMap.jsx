@@ -231,6 +231,28 @@ export default function NerMap({
         });
         map.on("mouseenter", "commodity-routes-line", () => { map.getCanvas().style.cursor = "pointer"; });
         map.on("mouseleave", "commodity-routes-line", () => { map.getCanvas().style.cursor = ""; });
+        
+        // NEW: Show Professional Popup for Commodity Shifts when clicking a route
+        map.on("click", "commodity-routes-line", (e) => {
+          if (e.features && e.features[0]) {
+            const props = e.features[0].properties;
+            new Popup()
+              .setLngLat(e.lngLat)
+              .setHTML(`
+                <div class="p-2 min-w-[150px] font-sans">
+                  <div class="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1 border-b pb-1">Supply Suggestion</div>
+                  <div class="text-sm font-semibold mb-1 capitalize" style="color: ${props.commodity === 'food' ? '#16A34A' : props.commodity === 'water' ? '#2563EB' : props.commodity === 'medicine' ? '#DC2626' : '#EA580C'}">
+                    ${props.commodity || 'Supplies'} - Qty: ${props.qty || props.quantity || 'Max'}
+                  </div>
+                  <div class="grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-neutral-600">
+                    <span class="font-medium text-neutral-400">From:</span> <span class="font-bold text-neutral-800">${props.depot_id || props.depot || 'Origin'}</span>
+                    <span class="font-medium text-neutral-400">To:</span> <span class="font-bold text-neutral-800">${props.village_id || props.village || 'Destination'}</span>
+                  </div>
+                </div>
+              `)
+              .addTo(map);
+          }
+        });
 
         map.on("click", "roads-line", (e) => {
           if (onRoadClick && e.features && e.features[0]) onRoadClick(e.features[0].properties);

@@ -197,28 +197,55 @@ export default function HazardInjectionPanel({ isDroppingPin, setIsDroppingPin, 
               </div>
             </div>
 
-            {/* FIXED: result.optimal_allocation not result.allocation */}
-            {result.optimal_allocation && (
-              <div className="pt-2 border-t space-y-2">
-                <div className="flex items-center gap-1.5 text-neutral-900 font-semibold">
-                  <Truck size={12} className="text-blue-500" /> Allocation Plan
+            {/* Detailed Supply Suggestions (LP Allocation) */}
+            {result.optimal_allocation && Array.isArray(result.optimal_allocation) && (
+              <div className="pt-2 border-t space-y-2 mt-2">
+                <div className="flex items-center gap-1.5 text-neutral-900 font-semibold mb-1">
+                  <Truck size={12} className="text-blue-600" /> Supply Suggestions (Depot → Village)
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-neutral-600">
-                  {/* FIXED: result.vehicles_needed not result.allocation.vehicles */}
-                  <div className="bg-white border rounded p-1.5">
-                    <div className="text-[9px] text-neutral-400 uppercase">Vehicles Needed</div>
-                    <div className="text-[12px] font-bold">{result.vehicles_needed || 0}</div>
+                
+                <div className="max-h-32 overflow-y-auto rounded border">
+                  <table className="w-full text-[10px] text-left">
+                    <thead className="bg-neutral-100 text-neutral-500 sticky top-0">
+                      <tr>
+                        <th className="p-1 font-medium border-b">From Depot</th>
+                        <th className="p-1 font-medium border-b">To Village</th>
+                        <th className="p-1 font-medium border-b">Commodity</th>
+                        <th className="p-1 font-medium border-b text-right">Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y text-neutral-700 bg-white">
+                      {result.optimal_allocation.length === 0 ? (
+                        <tr><td colSpan={4} className="text-center p-2 text-neutral-400">No safe routes available to shift commodities.</td></tr>
+                      ) : (
+                        result.optimal_allocation.map((alloc, idx) => (
+                          <tr key={idx} className="hover:bg-blue-50/50">
+                            <td className="p-1 font-medium text-blue-700">{alloc.depot_id || alloc.depot}</td>
+                            <td className="p-1">{alloc.village_id || alloc.village}</td>
+                            <td className="p-1 capitalize">{alloc.commodity}</td>
+                            <td className="p-1 text-right font-mono font-semibold">{alloc.quantity || alloc.qty}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-neutral-600 mt-2">
+                  <div className="bg-white border rounded p-1.5 shadow-sm">
+                    <div className="text-[9px] text-neutral-400 uppercase tracking-wider">Vehicles Needed</div>
+                    <div className="text-[13px] font-bold text-neutral-800">{result.vehicles_needed || 0}</div>
                   </div>
-                  {/* FIXED: result.estimated_cost not result.allocation.cost */}
-                  <div className="bg-white border rounded p-1.5">
-                    <div className="text-[9px] text-neutral-400 uppercase">Est. Cost</div>
-                    <div className="text-[12px] font-bold">₹{(result.estimated_cost || 0).toLocaleString('en-IN')}</div>
+                  <div className="bg-white border rounded p-1.5 shadow-sm">
+                    <div className="text-[9px] text-neutral-400 uppercase tracking-wider">Est. Cost</div>
+                    <div className="text-[13px] font-bold text-neutral-800">₹{(result.estimated_cost || 0).toLocaleString('en-IN')}</div>
                   </div>
                 </div>
+
                 {result.vehicles_needed > 0 && (
-                  <Button size="sm" className="w-full h-7 text-[10px] bg-green-600 hover:bg-green-700"
-                    onClick={() => toast({ title: "Vehicles Dispatched", description: `${result.vehicles_needed} truck(s) dispatched` })}>
-                    Dispatch Vehicles
+                  <Button size="sm" className="w-full h-8 text-[11px] mt-1 bg-blue-600 hover:bg-blue-700 shadow-sm"
+                    onClick={() => toast({ title: "Vehicles Dispatched", description: `${result.vehicles_needed} truck(s) dispatched along optimized routes.` })}>
+                    <Navigation className="w-3 h-3 mr-1" /> Shift Commodities via Optimized Routes
                   </Button>
                 )}
               </div>

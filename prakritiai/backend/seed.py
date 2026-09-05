@@ -245,15 +245,22 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     return 2 * r * math.asin(math.sqrt(min(1.0, a)))
 
 
-def _snap_edge(roads, lat, lon):
-    """Return (edge_id, node_u, node_v, geometry) for the nearest road, or None."""
+def _snap_edge(roads, lat, lon, roads_m=None):
+    """Return (edge_id, node_u, node_v, geometry) for the nearest road, or None.
+
+    `roads_m` is the road network already reprojected to EPSG:32646. Pass it in
+    (computed once by the caller) to avoid re-reprojecting the whole dataset on
+    every call -- that reprojection alone was the dominant cost when this was
+    called once per village during seeding.
+    """
     import pandas as pd
     from shapely.geometry import Point
     import geopandas as gpd
     if roads is None or len(roads) == 0:
         return None
     try:
-        roads_m = roads.to_crs(32646)
+        if roads_m is None:
+            roads_m = roads.to_crs(32646)
         pt = gpd.GeoDataFrame([{"geometry": Point(lon, lat)}], crs="EPSG:4326").to_crs(32646)
         keep = [c for c in ["edge_id", "geometry", "u", "v"] if c in roads_m.columns]
         nearest = gpd.sjoin_nearest(pt, roads_m[keep], how="left", max_distance=25000, distance_col="dist_m")
@@ -283,20 +290,36 @@ def _build_seed_graph(roads):
     if roads is None or len(roads) == 0:
         return G
     has_uv = "u" in roads.columns and "v" in roads.columns
-    for _, r in roads.iterrows():
-        geom = r.geometry
+
+    # Vectorized column access instead of iterrows(): iterrows() builds a full
+    # pandas Series for every row, which dominates runtime on a large road
+    # network (this was the main reason seeding could take minutes). Pulling
+    # each column out as a plain numpy/array once and indexing into that in
+    # the loop avoids that per-row overhead.
+    geoms = roads.geometry.values
+    edge_ids = roads["edge_id"].astype(str).values
+    lengths = roads["length"].values if "length" in roads.columns else [None] * len(roads)
+    length_kms = roads["length_km"].values if "length_km" in roads.columns else [0] * len(roads)
+    us = roads["u"].values if has_uv else None
+    vs = roads["v"].values if has_uv else None
+
+    edges = []
+    for i in range(len(roads)):
+        geom = geoms[i]
         if geom is None or geom.is_empty:
             continue
-        if has_uv and pd.notna(r.get("u")) and pd.notna(r.get("v")):
-            u, v = str(r["u"]), str(r["v"])
+        if has_uv and pd.notna(us[i]) and pd.notna(vs[i]):
+            u, v = str(us[i]), str(vs[i])
         else:
             coords = list(geom.coords)
             u = f"{coords[0][0]:.5f},{coords[0][1]:.5f}"
             v = f"{coords[-1][0]:.5f},{coords[-1][1]:.5f}"
-        length = r.get("length")
+        length = lengths[i]
         if length is None or (isinstance(length, float) and pd.isna(length)):
-            length = float(r.get("length_km") or 0) * 1000.0 or (geom.length if geom else 1.0)
-        G.add_edge(u, v, edge_id=str(r["edge_id"]), length=float(length), geometry=geom)
+            length = float(length_kms[i] or 0) * 1000.0 or (geom.length if geom else 1.0)
+        edges.append((u, v, {"edge_id": edge_ids[i], "length": float(length), "geometry": geom}))
+
+    G.add_edges_from(edges)
     return G
 
 
@@ -365,8 +388,20 @@ async def seed_supply_chain():
     except Exception:
         roads = None
 
-    G = _build_seed_graph(roads) if roads is not None else None
+    try:
+        G = _build_seed_graph(roads) if roads is not None else None
+    except Exception:
+        G = None
     depot_by_id = {d["id"]: d for d in SUPPLY_DEPOTS}
+
+    # Reproject once for the whole seeding pass instead of inside _snap_edge
+    # (which used to redo this ~20 times, once per depot/village lookup).
+    roads_m = None
+    if G is not None and G.number_of_edges() > 0:
+        try:
+            roads_m = roads.to_crs(32646)
+        except Exception:
+            roads_m = None
 
     routes = []
     for vil in SUPPLY_VILLAGES:
@@ -375,8 +410,8 @@ async def seed_supply_chain():
         depot_node = village_node = None
         length_m = _haversine_km(depot["lat"], depot["lon"], vil["lat"], vil["lon"]) * 1000.0
         if G is not None and G.number_of_edges() > 0:
-            d_edge = _snap_edge(roads, depot["lat"], depot["lon"])
-            v_edge = _snap_edge(roads, vil["lat"], vil["lon"])
+            d_edge = _snap_edge(roads, depot["lat"], depot["lon"], roads_m=roads_m)
+            v_edge = _snap_edge(roads, vil["lat"], vil["lon"], roads_m=roads_m)
             if d_edge and v_edge:
                 path, depot_node, village_node, length_m = _path_edge_ids(
                     G, d_edge.get("u"), v_edge.get("u"),

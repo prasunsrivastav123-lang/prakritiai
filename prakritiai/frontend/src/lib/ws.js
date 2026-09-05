@@ -10,7 +10,8 @@ export function ensureWS() {
   if (ws && ws.readyState <= 1) return;
   const token = localStorage.getItem("neris_token");
   if (!token) return;
-  const base = (process.env.REACT_APP_BACKEND_URL || "").replace(/^http/, "ws");
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
+  const base = backendUrl.replace(/^http/, "ws");
   try {
     ws = new WebSocket(`${base}/api/ws?token=${token}`);
     ws.onmessage = (e) => {
