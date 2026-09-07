@@ -35,6 +35,16 @@ const getCoords = (item) => {
 
 const safeUpper = (s) => (s ? String(s).toUpperCase() : "UNKNOWN");
 
+// HAZARD_COLORS keys use abbreviated sources (GOV/AI); normalize the
+// backend's full source strings ("government"/"ai_prediction") to match,
+// instead of falling through to the "#888" gray fallback.
+const sourceKey = (s) => {
+  const v = (s || "").toLowerCase();
+  if (v === "government") return "GOV";
+  if (v === "ai_prediction" || v === "ai") return "AI";
+  return safeUpper(s);
+};
+
 const baseStyle = {
   version: 8,
   sources: {
@@ -378,7 +388,7 @@ export default function NerMap({
         features: (hazards || []).map(h => {
           const coords = getCoords(h);
           if (!coords) return null;
-          const colorKey = `${safeUpper(h.hazard_type)}_${safeUpper(h.source)}`;
+          const colorKey = `${safeUpper(h.hazard_type)}_${sourceKey(h.source)}`;
           return {
             type: "Feature",
             geometry: { type: "Polygon", coordinates: createCircleCoordinates(coords[0], coords[1], h.hazard_radius_m || 500) },
@@ -447,7 +457,7 @@ export default function NerMap({
         if (!coords) return;
 
         const el = document.createElement("div");
-        const colorKey = `${safeUpper(h.hazard_type)}_${safeUpper(h.source)}`;
+        const colorKey = `${safeUpper(h.hazard_type)}_${sourceKey(h.source)}`;
         const color = HAZARD_COLORS[colorKey] || "#888";
         const isAI = h.source && (h.source.toLowerCase() === 'ai_prediction' || h.source.toLowerCase() === 'ai');
         el.style.cssText = `width:16px;height:16px;background:${color};border:2px solid #fff;transform:rotate(45deg);border-radius:2px;box-shadow:0 2px 4px rgba(0,0,0,0.3);${isAI ? 'border-style:dashed;' : ''}`;

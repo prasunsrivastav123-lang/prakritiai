@@ -18,7 +18,7 @@ import { getHelipads } from "@/lib/pipelineApi";
 const API_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
 
 const authFetch = async (path) => {
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem("neris_token");
   if (!token) return null;
   try {
     const res = await fetch(`${API_URL}${path}`, {
@@ -80,9 +80,9 @@ export default function GisMap() {
       authFetch("/api/pipeline/villages"),
       canSeeLiveVehicles ? authFetch("/api/vehicles/active") : Promise.resolve(null),
     ]);
-    if (depotsData?.depots) setDepots(depotsData.depots);
-    if (villagesData?.villages) setVillages(villagesData.villages);
-    if (vehiclesData?.vehicles) setPipelineVehicles(vehiclesData.vehicles);
+    if (Array.isArray(depotsData)) setDepots(depotsData);
+    if (Array.isArray(villagesData)) setVillages(villagesData);
+    if (Array.isArray(vehiclesData)) setPipelineVehicles(vehiclesData);
   }, [canSeeLiveVehicles]);
 
   useEffect(() => {

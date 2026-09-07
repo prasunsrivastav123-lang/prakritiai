@@ -1027,9 +1027,13 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 v_lat, v_lon = village_doc.get("lat"), village_doc.get("lon")
                 if d_lat is None or v_lat is None: continue
                 
-                s_edge = _find_nearest_edge(d_lat, d_lon)
-                t_edge = _find_nearest_edge(v_lat, v_lon)
-                r_best = risk_aware_dijkstra(G, s_edge, t_edge)
+                s_match = _find_nearest_edge_meta(d_lat, d_lon, max_distance_m=5000)
+                t_match = _find_nearest_edge_meta(v_lat, v_lon, max_distance_m=5000)
+                if not s_match or not t_match:
+                    continue
+                s_node = str(s_match.get("u") or s_match.get("v"))
+                t_node = str(t_match.get("u") or t_match.get("v"))
+                r_best = risk_aware_dijkstra(G, s_node, t_node)
                 
                 if r_best and r_best.path:
                     roads = _get_roads()
