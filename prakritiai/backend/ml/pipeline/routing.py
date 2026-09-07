@@ -22,7 +22,12 @@ def edge_survival(edge_data: Dict[str, Any], arrival_hours: float) -> float:
     if p0 <= 0:
         return 1.0
     clearance = max(float(edge_data.get("reopen_after_hours", 6.0)), 1e-3)
-    decay = 1.0 / (1.0 + math.exp(6.0 * (arrival_hours - clearance) / clearance))
+    # A search exploring a long detour around a blocked edge can reach very
+    # large arrival_hours; math.exp overflows well before that (~709 for a
+    # float64). Clamp the exponent — beyond it the sigmoid is already
+    # indistinguishable from its 0/1 asymptote to floating-point precision.
+    exponent = max(-700.0, min(700.0, 6.0 * (arrival_hours - clearance) / clearance))
+    decay = 1.0 / (1.0 + math.exp(exponent))
     p_t = p0 * decay
     return 1.0 - min(p_t, 0.99)
 

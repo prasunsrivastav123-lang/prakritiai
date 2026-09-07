@@ -7,6 +7,7 @@ as FastAPI endpoints under /api/pipeline/*.
 import os
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -29,6 +30,14 @@ HAZARDS_PATH = os.environ.get("HAZARDS_PARQUET", str(_DATA_DIR / "hazards.parque
 _roads_gdf: Optional[gpd.GeoDataFrame] = None
 _hazards_df: Optional[pd.DataFrame] = None
 _graph = None  # networkx DiGraph, built lazily
+
+TRACK_PATHS_PATH = os.environ.get("TRACK_PATHS_PARQUET", str(_DATA_DIR / "demo_track_paths.parquet"))
+ELEVATION_GRID_PATH = os.environ.get("ELEVATION_GRID_PARQUET", str(_DATA_DIR / "demo_elevation_grid.parquet"))
+HELIPADS_PATH = os.environ.get("HELIPADS_PARQUET", str(_DATA_DIR / "demo_helipads.parquet"))
+
+_track_graph = None
+_elevation_lookup = None
+_helipads: Optional[List[Dict[str, Any]]] = None
 
 
 def _get_roads() -> gpd.GeoDataFrame:
@@ -64,6 +73,53 @@ def _get_graph():
         _graph = build_graph(roads)
         logger.info(f"Graph built: {_graph.number_of_nodes()} nodes, {_graph.number_of_edges()} edges")
     return _graph
+
+
+def _get_track_graph():
+    """Lazily load the walkable/2-wheeler track graph (path/track/footway/
+    bridleway/cycleway) used for the isolated-village fallback demo."""
+    global _track_graph
+    if _track_graph is None:
+        from ml.pipeline.multimodal_fallback import load_track_graph
+        try:
+            _track_graph = load_track_graph(TRACK_PATHS_PATH)
+            logger.info(f"Loaded track graph: {_track_graph.number_of_edges()} edges from {TRACK_PATHS_PATH}")
+        except Exception as e:
+            logger.warning(f"Could not load track graph: {e}")
+            import networkx as nx
+            _track_graph = nx.DiGraph()
+    return _track_graph
+
+
+def _get_elevation_lookup():
+    """Lazily load the elevation grid used for drone terrain-clearance checks."""
+    global _elevation_lookup
+    if _elevation_lookup is None:
+        from ml.pipeline.multimodal_fallback import build_elevation_lookup
+        try:
+            df = pd.read_parquet(ELEVATION_GRID_PATH)
+            _elevation_lookup = build_elevation_lookup(df)
+            source = df["source"].mode().iloc[0] if "source" in df.columns and len(df) else "unknown"
+            logger.info(f"Loaded elevation grid: {len(df)} points, source={source}")
+        except Exception as e:
+            logger.warning(f"Could not load elevation grid: {e}")
+            _elevation_lookup = None
+    return _elevation_lookup
+
+
+def _get_helipads() -> List[Dict[str, Any]]:
+    """Lazily load helipad/aerodrome points used for the helicopter fallback mode."""
+    global _helipads
+    if _helipads is None:
+        from ml.pipeline.multimodal_fallback import load_helipads
+        try:
+            _helipads = load_helipads(HELIPADS_PATH)
+            sources = {h.get("source") for h in _helipads}
+            logger.info(f"Loaded helipads: {len(_helipads)}, source={sources}")
+        except Exception as e:
+            logger.warning(f"Could not load helipads: {e}")
+            _helipads = []
+    return _helipads
 
 
 def _find_nearest_edge(lat: float, lon: float) -> str:
@@ -134,9 +190,13 @@ def _serialize_route(r) -> Optional[Dict[str, Any]]:
         return None
     from ml.pipeline.routing import RouteResult
     if isinstance(r, RouteResult):
+        # travel_hours is float("inf") for a genuinely infeasible route (no
+        # path exists) — exactly the case for a fully-isolated village, and
+        # not valid JSON. Every other numeric field here is already bounded.
+        travel_hours = r.travel_hours if math.isfinite(r.travel_hours) else None
         return {
             "path": r.path,
-            "travel_hours": r.travel_hours,
+            "travel_hours": travel_hours,
             "survivability": r.survivability,
             "expected_risk": r.expected_risk,
             "feasible": r.feasible,
@@ -699,6 +759,15 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 if G.has_edge(a, b):
                     G[a][b]["closed"] = True
                     G[a][b]["block_probability"] = blockage
+                    # edge_survival()'s sigmoid treats a block as "likely
+                    # already cleared" once arrival_hours exceeds
+                    # reopen_after_hours — which defaults to 0 on edges that
+                    # never had a real clearance estimate, making
+                    # block_probability inert for any nonzero travel time.
+                    # Propagate the same clearance estimate already computed
+                    # for the road_blocks doc so a live route re-check
+                    # actually treats this edge as blocked.
+                    G[a][b]["reopen_after_hours"] = clearance_map[req.severity]
                     if G[a][b].get("bridge_id"):
                         if f"SRLG Warning: Hazard on shared bridge {G[a][b]['bridge_id']}" not in srlg_warnings:
                             srlg_warnings.append(f"SRLG Warning: Hazard on shared bridge {G[a][b]['bridge_id']}")
@@ -765,26 +834,36 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 for c, qty in eff_inv.items():
                     inventory[(d_id, c)] = float(qty)
 
-            isolated_villages = []
+            # Cheap pre-filter (does every known route for this village cross a
+            # blocked edge?) followed by a live re-route confirmation on the
+            # current post-hazard graph G — rather than trusting only the
+            # static seeded path list, which never reflects a route that's
+            # actually still passable. Fallback-option computation for
+            # confirmed-isolated villages happens after the LP call below, so
+            # it can be seeded from the LP's actual per-commodity shortfall.
+            village_isolation: Dict[str, bool] = {}
             for vil in villages:
                 v_id = vil["id"]
                 v_routes = [r for r in all_routes if r.get("village_id") == v_id]
-                if v_routes:
-                    b_count = count_blocked_routes(v_id, all_routes, blocked_edges)
-                    if b_count == len(v_routes):
-                        isolated_villages.append(v_id)
-                        pop = vil.get("population", 1000)
-                        weighted_commodities = {}
-                        for c in commodities:
-                            weighted_commodities[c] = calculate_weighted_priority(c, pop, 24.0, 0.8)
-                        
-                        await manager.broadcast({
-                            "event": "village_isolated",
-                            "village_id": v_id,
-                            "status": "ISOLATED",
-                            "weighted_commodities": weighted_commodities,
-                            "delivery_options": ["airdrop", "helicopter", "drone"]
-                        })
+                if not v_routes:
+                    continue
+                b_count = count_blocked_routes(v_id, all_routes, blocked_edges)
+                if b_count != len(v_routes):
+                    continue
+                still_reachable = False
+                for r in v_routes:
+                    src = r.get("depot_node") or (r.get("path") or [None])[0]
+                    tgt = r.get("village_node") or (r.get("path") or [None])[-1]
+                    if not src or not tgt:
+                        continue
+                    try:
+                        live_result = risk_aware_dijkstra(G, str(src), str(tgt), min_survivability=0.85)
+                        if live_result.path and live_result.feasible:
+                            still_reachable = True
+                            break
+                    except Exception as e:
+                        logger.warning(f"Live isolation re-check failed for {v_id}: {e}")
+                village_isolation[v_id] = not still_reachable
 
             from ml.pipeline.resilience import haversine_distance, calculate_village_state
             for vil in villages:
@@ -797,7 +876,10 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 
                 stockout_risk = 0.9 if vil.get("inventory_level", 100) < 20 else 0.2
                 
-                new_state_enum = calculate_village_state(v_id, all_routes, blocked_edges, hazard_dist, stockout_risk, current_state)
+                new_state_enum = calculate_village_state(
+                    v_id, all_routes, blocked_edges, hazard_dist, stockout_risk, current_state,
+                    isolated_override=village_isolation.get(v_id),
+                )
                 new_state = new_state_enum.name
                 
                 if new_state != current_state:
@@ -854,6 +936,57 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 )
                 allocation_out = _serialize_allocation(lp)
                 estimated_cost = float(allocation_out.get("total_cost") or 0)
+
+            # Villages confirmed isolated (see village_isolation above): rank
+            # multi-modal fallback delivery (track/drone/helicopter) per
+            # commodity, seeded from the LP's actual shortfall so a mode isn't
+            # recommended for a commodity the LP could still serve some other way.
+            from ml.pipeline.multimodal_fallback import rank_fallback_options
+            depot_by_id = {d["id"]: d for d in depots}
+            village_by_id = {v["id"]: v for v in villages}
+            track_graph = _get_track_graph()
+            elevation_lookup = _get_elevation_lookup()
+            helipad_list = _get_helipads()
+            shortfall = (allocation_out or {}).get("shortfall", {}) or {}
+
+            for v_id, is_isolated in village_isolation.items():
+                if not is_isolated:
+                    continue
+                vil = village_by_id.get(v_id)
+                if not vil or "lat" not in vil or "lon" not in vil:
+                    continue
+                depot_id_for_village = next(
+                    (r.get("depot_id") for r in all_routes if r.get("village_id") == v_id), None
+                )
+                depot = depot_by_id.get(depot_id_for_village)
+                if not depot or "lat" not in depot or "lon" not in depot:
+                    continue
+
+                fallback_options = {}
+                fallback_routes = []
+                for c in commodities:
+                    qty = shortfall.get(f"{v_id}|{c}") or (vil.get("demand") or {}).get(c, 0)
+                    if not qty or qty <= 0:
+                        continue
+                    ranked = rank_fallback_options(depot, vil, c, qty, track_graph, elevation_lookup, helipad_list)
+                    fallback_options[c] = ranked
+                    for opt in ranked["ranked"]:
+                        if opt["feasible"] and opt["geometry"]:
+                            fallback_routes.append({
+                                "mode": opt["mode"], "geometry": opt["geometry"],
+                                "village_id": v_id, "commodity": c,
+                            })
+
+                pop = vil.get("population", 1000)
+                weighted_commodities = {c: calculate_weighted_priority(c, pop, 24.0, 0.8) for c in commodities}
+                await manager.broadcast({
+                    "event": "village_isolated",
+                    "village_id": v_id,
+                    "status": "ISOLATED",
+                    "weighted_commodities": weighted_commodities,
+                    "fallback_options": fallback_options,
+                    "fallback_routes": fallback_routes,
+                })
     except Exception as e:
         logger.error(f"inject-and-optimize routing/LP failed: {e}", exc_info=True)
 
@@ -1152,6 +1285,73 @@ async def list_pipeline_villages():
 @router.get("/pipeline/supply-routes")
 async def list_supply_routes():
     return await _docs("supply_routes")
+
+
+@router.get("/pipeline/villages/{village_id}/fallback-options")
+async def get_village_fallback_options(village_id: str):
+    """Recompute multi-modal fallback options for an already-isolated village
+    on demand — e.g. after a page reload, since the isolation WS event fires
+    only once at the moment isolation is detected."""
+    from core.database import db
+    from ml.pipeline.multimodal_fallback import rank_fallback_options
+
+    vil = await db.villages.find_one({"id": village_id}, {"_id": 0})
+    if not vil:
+        raise HTTPException(status_code=404, detail="Village not found")
+    if vil.get("village_state") != "ISOLATED" and vil.get("village_state") != "CRITICAL":
+        raise HTTPException(status_code=400, detail="Village is not currently isolated")
+    if "lat" not in vil or "lon" not in vil:
+        raise HTTPException(status_code=400, detail="Village has no coordinates")
+
+    route = await db.supply_routes.find_one({"village_id": village_id}, {"_id": 0})
+    depot_id = route.get("depot_id") if route else None
+    depot = await db.depots.find_one({"id": depot_id}, {"_id": 0}) if depot_id else None
+    if not depot or "lat" not in depot or "lon" not in depot:
+        raise HTTPException(status_code=404, detail="No depot found for this village")
+
+    track_graph = _get_track_graph()
+    elevation_lookup = _get_elevation_lookup()
+    helipad_list = _get_helipads()
+
+    fallback_options = {}
+    for c, qty in (vil.get("demand") or {}).items():
+        if not qty or qty <= 0:
+            continue
+        fallback_options[c] = rank_fallback_options(depot, vil, c, qty, track_graph, elevation_lookup, helipad_list)
+
+    return {"village_id": village_id, "depot_id": depot_id, "fallback_options": fallback_options}
+
+
+@router.get("/pipeline/helipads")
+async def list_helipads():
+    """Real (or, if unavailable, clearly-labeled mock) helipad/aerodrome
+    points used for the helicopter fallback mode — for map markers."""
+    return _get_helipads()
+
+
+@router.get("/pipeline/multimodal/status")
+async def multimodal_status():
+    """Pre-demo sanity check: are the track graph / elevation grid / helipads
+    loaded, and are they real data or a mock/synthetic fallback?"""
+    track_graph = _get_track_graph()
+    elevation_lookup = _get_elevation_lookup()
+    helipad_list = _get_helipads()
+
+    elevation_source = "unavailable"
+    try:
+        df = pd.read_parquet(ELEVATION_GRID_PATH)
+        if "source" in df.columns and len(df):
+            elevation_source = df["source"].mode().iloc[0]
+    except Exception:
+        pass
+
+    helipad_sources = sorted({h.get("source", "unknown") for h in helipad_list}) if helipad_list else []
+
+    return {
+        "track_graph": {"edges": track_graph.number_of_edges() if track_graph else 0},
+        "elevation_grid": {"loaded": elevation_lookup is not None, "source": elevation_source},
+        "helipads": {"count": len(helipad_list), "sources": helipad_sources},
+    }
 
 @router.post("/pipeline/driver/breakdown")
 async def driver_breakdown(vehicle_id: str = Query(...)):

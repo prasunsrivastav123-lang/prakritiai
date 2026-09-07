@@ -146,6 +146,26 @@ export const replanRoutes = async (edgeId, blockagePct = 0.95, hazardType = "lan
   return data;
 };
 
+// 9b. GET /api/pipeline/villages/{id}/fallback-options — recompute-on-demand
+// (e.g. after a page reload, since the village_isolated WS event fires once)
+export const getIsolationFallback = async (villageId) => {
+  const { data } = await api.get(`/pipeline/villages/${villageId}/fallback-options`);
+  return data;
+};
+
+// 9c. GET /api/pipeline/multimodal/status — track graph / elevation / helipad
+// load status, useful as a pre-demo sanity check
+export const getMultimodalStatus = async () => {
+  const { data } = await api.get("/pipeline/multimodal/status");
+  return data;
+};
+
+// 9d. GET /api/pipeline/helipads — real (or mock-fallback) helipad points
+export const getHelipads = async () => {
+  const { data } = await api.get("/pipeline/helipads");
+  return data;
+};
+
 // 10. Vehicles Management & Tracking
 export const getActiveVehicles = async () => {
   const { data } = await api.get("/vehicles/active");

@@ -232,6 +232,16 @@ SUPPLY_VILLAGES = [
      "population": 35900, "demand": {"food": 410, "water": 590, "medicine": 85, "fuel": 70}},
     {"id": "vil-tuensang", "name": "Tuensang", "lat": 26.2700, "lon": 94.8300, "state": "Nagaland", "depot_id": "dep-guwahati",
      "population": 36700, "demand": {"food": 400, "water": 580, "medicine": 88, "fuel": 72}},
+    # Real OSM place (discovered via download_demo_area.py's village-discovery
+    # step). Verified against the real Shillong road network
+    # (demo_vehicle_roads.parquet) — depot-to-village shortest path is 135
+    # edges, well-meshed the whole way except for one graph-theoretic bridge
+    # edge (e-9658168618-9658153896-0) that is literally the last edge before
+    # the village node — a genuine single-road-in/out spur, confirmed
+    # deterministic across repeated graph builds. One hazard on that one
+    # segment severs all vehicle access, matching the isolation demo's premise.
+    {"id": "vil-umsaw", "name": "Umsaw Myllium", "lat": 25.5070, "lon": 91.8565, "state": "Meghalaya", "depot_id": "dep-shillong",
+     "population": 3100, "demand": {"food": 300, "water": 450, "medicine": 40, "fuel": 60}},
 ]
 
 
@@ -372,11 +382,14 @@ async def seed_supply_chain():
             })
 
     roads = None
+    MAX_SEED_GRAPH_EDGES = 50_000  # seeding only needs a handful of depot<->village routes;
+    # a full regional/national OSM extract (millions of edges) would exhaust memory if graphed.
     try:
         import geopandas as gpd
+        import pyarrow.parquet as pq
         data_dir = Path(__file__).resolve().parent / "data" / "processed"
         roads_path = os.environ.get("ROADS_PARQUET", str(data_dir / "roads.parquet"))
-        if Path(roads_path).exists():
+        if Path(roads_path).exists() and pq.ParquetFile(roads_path).metadata.num_rows <= MAX_SEED_GRAPH_EDGES:
             roads = gpd.read_parquet(roads_path)
             if "bridge_id" not in roads.columns:
                 import hashlib
@@ -439,8 +452,16 @@ async def seed_supply_chain():
             "source": "SUPPLY_CHAIN",
         })
 
-    if await db.supply_routes.count_documents({"route_id": "sr-vil-nongstoin"}) == 0:
-        await db.supply_routes.insert_many(routes)
+    # Per-route idempotency (not one hardcoded sentinel route_id): otherwise
+    # adding a new village to SUPPLY_VILLAGES after seeding already ran once
+    # would silently insert nothing for it, since the old check only looked
+    # for "sr-vil-nongstoin" specifically.
+    existing_route_ids = {
+        r["route_id"] async for r in db.supply_routes.find({}, {"route_id": 1})
+    }
+    new_routes = [r for r in routes if r["route_id"] not in existing_route_ids]
+    if new_routes:
+        await db.supply_routes.insert_many(new_routes)
 
     drivers = [
         {"name": "R. Lyngdoh", "phone": "+91-94361-11001", "license": "ML-042011-0012345"},

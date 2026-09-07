@@ -40,14 +40,24 @@ app.include_router(pipeline_router, prefix="/api")
 
 @app.on_event("startup")
 async def on_startup():
+    import asyncio
+
     await seed_users()
     logger.info("NERIS: users seeded (owner + demo accounts)")
     await seed_dashboard()
     logger.info("NERIS: dashboard demo dataset ready")
-    await seed_supply_chain()
-    logger.info("NERIS: supply-chain depots, villages, routes, and vehicles ready")
 
-    import asyncio
+    async def _seed_supply_chain_background():
+        try:
+            await seed_supply_chain()
+            logger.info("NERIS: supply-chain depots, villages, routes, and vehicles ready")
+        except Exception:
+            logger.exception("NERIS: supply-chain seeding failed")
+
+    # Runs in the background instead of blocking startup: building the routing
+    # graph from the full road network is expensive and unrelated to auth/login,
+    # which previously couldn't be served until this finished (or OOM'd).
+    asyncio.create_task(_seed_supply_chain_background())
     from core.database import db
     from core.ws import manager
     from datetime import datetime, timezone

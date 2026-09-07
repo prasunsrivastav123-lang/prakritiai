@@ -10,7 +10,9 @@ import RoadControlDrawer from "@/components/RoadControlDrawer";
 import HazardInjectionPanel from "@/components/HazardInjectionPanel";
 import PipelineStatusWidget from "@/components/PipelineStatusWidget";
 import PrePositioningPanel from "@/components/PrePositioningPanel";
+import IsolationFallbackPanel from "@/components/IsolationFallbackPanel";
 import { useToast } from "@/hooks/use-toast";
+import { getHelipads } from "@/lib/pipelineApi";
 
 // Pipeline API helper — fetches with JWT auth
 const API_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
@@ -36,7 +38,7 @@ export default function GisMap() {
   const [data, setData] = useState(null);
   const [zones, setZones] = useState([]);
   const [environment, setEnvironment] = useState(null);
-  const [layers, setLayers] = useState({ roads: true, vehicles: true, incidents: true, traffic: false, hazards: true, altRoutes: true });
+  const [layers, setLayers] = useState({ roads: true, vehicles: true, incidents: true, traffic: false, hazards: true, altRoutes: true, fallbackRoutes: true });
   const [selectedRoad, setSelectedRoad] = useState(null);
   const [isDroppingPin, setIsDroppingPin] = useState(false);
   const [pinCoords, setPinCoords] = useState(null);
@@ -50,6 +52,9 @@ export default function GisMap() {
   const [alternativeRoutes, setAlternativeRoutes] = useState([]);
   const [prePositioningRoutes, setPrePositioningRoutes] = useState([]);
   const [commodityRoutes, setCommodityRoutes] = useState([]);
+  const [fallbackOptions, setFallbackOptions] = useState({}); // keyed by village_id
+  const [fallbackRoutes, setFallbackRoutes] = useState([]);
+  const [helipads, setHelipads] = useState([]);
 
   // Existing: fetch dashboard data
   const fetchAll = useCallback(async () => {
@@ -87,6 +92,11 @@ export default function GisMap() {
     const t2 = setInterval(fetchPipelineData, 30000);
     return () => { clearInterval(t1); clearInterval(t2); };
   }, [fetchAll, fetchPipelineData]);
+
+  // Helipads are a static demo dataset — fetch once, no polling needed.
+  useEffect(() => {
+    getHelipads().then(setHelipads).catch(() => {});
+  }, []);
 
   // WebSocket — handle BOTH old and new events
   useEffect(() => {
@@ -129,6 +139,12 @@ export default function GisMap() {
       else if (eventType === "village_isolated") {
         toast({ title: "🚨 Village Isolated!", description: `Village ${msg.village_id} is completely blocked.` });
         setVillages(prev => prev.map(v => v.id === msg.village_id ? { ...v, is_isolated: true } : v));
+        if (msg.fallback_options) {
+          setFallbackOptions(prev => ({ ...prev, [msg.village_id]: msg.fallback_options }));
+        }
+        if (msg.fallback_routes) {
+          setFallbackRoutes(prev => [...prev, ...msg.fallback_routes]);
+        }
       }
       else if (eventType === "vehicle_location_update") {
         setPipelineVehicles(prev => prev.map(v =>
@@ -207,6 +223,9 @@ export default function GisMap() {
             alternativeRoutes={alternativeRoutes}
             prePositioningRoutes={prePositioningRoutes}
             commodityRoutes={commodityRoutes}
+            fallbackRoutes={fallbackRoutes}
+            helipads={helipads}
+            fallbackOptions={fallbackOptions}
             depots={depots}
             villages={villages}
             layers={{ ...layers, vehicles: layers.vehicles && canSeeLiveVehicles }}
@@ -230,6 +249,12 @@ export default function GisMap() {
               pinCoords={pinCoords}
             />
             <PrePositioningPanel />
+            {Object.keys(fallbackOptions).length > 0 && (
+              <IsolationFallbackPanel
+                villages={villages}
+                fallbackOptions={fallbackOptions}
+              />
+            )}
           </div>
 
           {/* Top-right: Pipeline Status */}
@@ -248,6 +273,7 @@ export default function GisMap() {
               { key: "incidents", label: "Incidents" },
               { key: "hazards", label: "Hazards" },
               { key: "altRoutes", label: "Alt Routes" },
+              { key: "fallbackRoutes", label: "Fallback Delivery" },
               { key: "traffic", label: "Traffic" },
             ].map((l) => (
               <label key={l.key} className="flex items-center gap-2 py-1 text-[12px] text-neutral-700 cursor-pointer">
@@ -272,6 +298,16 @@ export default function GisMap() {
               ].map(([k, label]) => (
                 <div key={k} className="flex items-center gap-1.5 text-[10.5px] text-neutral-600">
                   <span className="w-4 h-[3px] rounded-full" style={{ background: STATUS_COLORS[k] }} />
+                  {label}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1.5 pt-1.5 border-t hairline">
+              {[
+                ["#78716C", "Track/Path"], ["#0EA5E9", "Drone Corridor"], ["#7C3AED", "Helicopter"],
+              ].map(([color, label]) => (
+                <div key={label} className="flex items-center gap-1.5 text-[10.5px] text-neutral-600">
+                  <span className="w-4 h-[3px] rounded-full border-t border-dashed" style={{ borderColor: color }} />
                   {label}
                 </div>
               ))}

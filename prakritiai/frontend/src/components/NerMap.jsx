@@ -12,6 +12,9 @@ export const STATUS_COLORS = {
   LOCAL: "#64748B",
   ALT_ROUTE: "#16A34A",
   PRE_POS: "#9333EA",
+  FALLBACK_TRACK: "#78716C",
+  FALLBACK_DRONE: "#0EA5E9",
+  FALLBACK_HELI: "#7C3AED",
 };
 
 export const HAZARD_COLORS = {
@@ -81,6 +84,9 @@ export default function NerMap({
   alternativeRoutes = [],
   prePositioningRoutes = [],
   commodityRoutes = [],
+  fallbackRoutes = [],
+  helipads = [],
+  fallbackOptions = {},
   depots = [],
   villages = [],
   trafficOverlay = [],
@@ -154,6 +160,9 @@ export default function NerMap({
         map.addSource("hazard_zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addSource("traffic", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addSource("commodity_routes", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("fallback_track", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("fallback_drone", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("fallback_heli", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 
         map.addLayer({
           id: "hazard-zones-fill", type: "fill", source: "hazard_zones",
@@ -214,6 +223,35 @@ export default function NerMap({
           id: "commodity-routes-line", type: "line", source: "commodity_routes",
           layout: { "line-cap": "round", "line-join": "round" },
           paint: { "line-color": ["get", "color"], "line-width": 3, "line-opacity": 0.9 }
+        });
+
+        map.addLayer({
+          id: "fallback-track-line", type: "line", source: "fallback_track",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": STATUS_COLORS.FALLBACK_TRACK, "line-width": 2.5, "line-dasharray": [1, 1], "line-opacity": 0.85 }
+        });
+        map.addLayer({
+          id: "fallback-drone-line", type: "line", source: "fallback_drone",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": STATUS_COLORS.FALLBACK_DRONE, "line-width": 2.5, "line-dasharray": [4, 2], "line-opacity": 0.85 }
+        });
+        map.addLayer({
+          id: "fallback-heli-line", type: "line", source: "fallback_heli",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": STATUS_COLORS.FALLBACK_HELI, "line-width": 2.5, "line-dasharray": [6, 3, 1, 3], "line-opacity": 0.85 }
+        });
+
+        map.on("click", ["fallback-track-line", "fallback-drone-line", "fallback-heli-line"], (e) => {
+          if (e.features && e.features[0]) {
+            const p = e.features[0].properties;
+            new Popup().setLngLat(e.lngLat)
+              .setHTML(`<div class="p-2 min-w-[150px] font-sans">
+                <div class="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1 border-b pb-1">Fallback Delivery</div>
+                <div class="text-sm font-semibold mb-1 capitalize">${p.mode || 'route'}</div>
+                <div class="text-[11px] text-neutral-600">${safeUpper(p.commodity)} to ${p.village_id}</div>
+              </div>`)
+              .addTo(map);
+          }
         });
 
         map.on("click", "commodity-routes-line", (e) => {
@@ -322,6 +360,19 @@ export default function NerMap({
       };
       map.getSource("commodity_routes").setData(commodityFC);
 
+      const showFallback = layers.fallbackRoutes !== false;
+      const fallbackByMode = { track: [], drone: [], heli: [] };
+      if (showFallback) {
+        (fallbackRoutes || []).forEach(r => {
+          if (!r || !r.geometry) return;
+          const key = r.mode === "helicopter" ? "heli" : r.mode === "drone" ? "drone" : "track";
+          fallbackByMode[key].push({ type: "Feature", geometry: r.geometry, properties: r });
+        });
+      }
+      map.getSource("fallback_track").setData({ type: "FeatureCollection", features: fallbackByMode.track });
+      map.getSource("fallback_drone").setData({ type: "FeatureCollection", features: fallbackByMode.drone });
+      map.getSource("fallback_heli").setData({ type: "FeatureCollection", features: fallbackByMode.heli });
+
       const hazardZonesFC = {
         type: "FeatureCollection",
         features: (hazards || []).map(h => {
@@ -352,7 +403,7 @@ export default function NerMap({
     } catch (err) {
       console.error("NerMap: error updating sources", err);
     }
-  }, [roads, blockedEdges, alternativeRoutes, prePositioningRoutes, commodityRoutes, hazards, trafficOverlay, layers.traffic]);
+  }, [roads, blockedEdges, alternativeRoutes, prePositioningRoutes, commodityRoutes, fallbackRoutes, hazards, trafficOverlay, layers.traffic, layers.fallbackRoutes]);
 
   // Update Markers — ALL with NaN guards
   useEffect(() => {
@@ -364,7 +415,7 @@ export default function NerMap({
         if (Array.isArray(m)) m.forEach(x => x && x.remove && x.remove());
         else if (m) m.remove && m.remove();
       });
-      markersRef.current = { vehicles: [], hazards: [], depots: [], villages: [], tempPin: null };
+      markersRef.current = { vehicles: [], hazards: [], depots: [], villages: [], helipads: [], tempPin: null };
 
       if (layers.vehicles) {
         (vehicles || []).forEach(v => {
@@ -434,12 +485,34 @@ export default function NerMap({
         const marker = new Marker({ element: el }).setLngLat(coords).addTo(map);
         if (v.is_isolated) {
             marker.getElement().addEventListener('click', () => {
+                const opts = fallbackOptions[v.id] || {};
+                const rows = Object.entries(opts).map(([commodity, r]) => {
+                  const rec = (r.ranked || []).find(o => o.mode === r.recommended);
+                  if (!rec) return `<div>${safeUpper(commodity)}: no feasible option</div>`;
+                  return `<div><strong>${safeUpper(commodity)}</strong>: ${rec.mode} — ₹${rec.cost} · ${rec.eta_hours}h</div>`;
+                }).join("") || "<div>Computing fallback options…</div>";
                 new Popup().setLngLat(coords)
-                  .setHTML(`<div class="p-2"><strong>${v.id}</strong><br/><span style="color:red;font-weight:bold;">ISOLATED</span><br/>Airdrop Required</div>`)
+                  .setHTML(`<div class="p-2 min-w-[180px]"><strong>${v.id}</strong><br/><span style="color:red;font-weight:bold;">ISOLATED</span><div class="mt-1 text-[11px]">${rows}</div></div>`)
                   .addTo(map);
             });
         }
         markersRef.current.villages.push(marker);
+      });
+
+      (helipads || []).forEach(h => {
+        const coords = getCoords(h);
+        if (!coords) return;
+        const el = document.createElement("div");
+        const isMock = h.source === "mock_fallback";
+        el.style.cssText = `width:18px;height:18px;background:${STATUS_COLORS.FALLBACK_HELI};border-radius:50%;border:2px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:bold;${isMock ? 'border-style:dashed;' : ''}`;
+        el.innerText = "H";
+        const marker = new Marker({ element: el }).setLngLat(coords).addTo(map);
+        marker.getElement().addEventListener('click', () => {
+          new Popup().setLngLat(coords)
+            .setHTML(`<div class="p-2"><strong>${h.name || h.id}</strong><br/><span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:${isMock ? '#C77C00' : '#16A34A'};">${isMock ? 'MOCK — no real helipad found nearby' : 'real OSM data'}</span></div>`)
+            .addTo(map);
+        });
+        markersRef.current.helipads.push(marker);
       });
 
       if (temporaryPin) {
@@ -454,7 +527,7 @@ export default function NerMap({
     } catch (err) {
       console.error("NerMap: error updating markers", err);
     }
-  }, [vehicles, hazards, depots, villages, temporaryPin, layers.vehicles]);
+  }, [vehicles, hazards, depots, villages, helipads, fallbackOptions, temporaryPin, layers.vehicles]);
 
   useEffect(() => {
     if (mapRef.current) {

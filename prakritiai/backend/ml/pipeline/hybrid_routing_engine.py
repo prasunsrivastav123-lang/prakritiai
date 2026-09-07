@@ -115,7 +115,10 @@ class HybridRoutingEngine:
                 # Calculate Risk / Survivability
                 p0 = float(edge_data.get("block_probability", 0.0))
                 clearance = max(float(edge_data.get("reopen_after_hours", 6.0)), 1e-3)
-                decay = 1.0 / (1.0 + math.exp(6.0 * (g - clearance) / clearance))
+                # Clamp: a search exploring a long detour can reach very large
+                # g (elapsed hours); math.exp overflows well before that.
+                exponent = max(-700.0, min(700.0, 6.0 * (g - clearance) / clearance))
+                decay = 1.0 / (1.0 + math.exp(exponent))
                 p_t = p0 * decay
                 edge_survival = 1.0 - min(p_t, 0.99)
                 

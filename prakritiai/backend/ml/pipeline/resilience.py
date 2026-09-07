@@ -1,6 +1,6 @@
 import math
 from enum import Enum, auto
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 class VillageState(Enum):
     NORMAL = "NORMAL"
@@ -96,16 +96,23 @@ def calculate_village_state(
     blocked_edges: List[str],
     hazard_dist: float = float('inf'),
     stockout_risk: float = 0.0,
-    current_state: str = "NORMAL"
+    current_state: str = "NORMAL",
+    isolated_override: Optional[bool] = None,
 ) -> VillageState:
     # Manual overrides or active evacuations shouldn't be automatically reverted
     if current_state in ["EVACUATING", "EVACUATED"]:
         return VillageState[current_state]
 
-    # Check isolation
-    village_routes = [r for r in routes if r.get('village_id') == village_id and r.get('active', True)]
-    b_count = count_blocked_routes(village_id, routes, blocked_edges)
-    isolated = (len(village_routes) > 0 and b_count == len(village_routes))
+    # Check isolation. isolated_override lets a caller substitute a live,
+    # graph-based feasibility re-check (does any vehicle route still exist on
+    # the current post-hazard graph?) instead of trusting the static seeded
+    # supply_routes.path list, which never reflects newly-opened alternates.
+    if isolated_override is not None:
+        isolated = isolated_override
+    else:
+        village_routes = [r for r in routes if r.get('village_id') == village_id and r.get('active', True)]
+        b_count = count_blocked_routes(village_id, routes, blocked_edges)
+        isolated = (len(village_routes) > 0 and b_count == len(village_routes))
 
     if hazard_dist <= 500:
         return VillageState.EVACUATION_REVIEW
