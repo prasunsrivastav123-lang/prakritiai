@@ -1,1 +1,7 @@
-YAUUUUUUUUUUUUUUUUUUU
+Problem: The North Eastern Region’s (NER) extreme terrain and weather cause frequent landslides and floods, crippling logistics. This creates critical shortages of medicine and food, exacerbated by a lack of predictive routing and total communication blackouts during disasters.
+
+Proposed Solution: We propose PrakritiAI, an autonomous, GIS-integrated logistics intelligence platform. It features a real-time command dashboard for multimodal vehicle tracking, predictive hazard mapping, and an offline-first field app that transmits incident reports via ISRO NavIC satellite Bluetooth dongles during complete network failures.
+
+Key Innovation: We leapfrog standard GPS routing by deploying Geostatistical Data Assimilation (Co-Kriging), fusing sparse IoT sensors with continuous NASA satellite rasters for high-fidelity hazard prediction. Our physics-based AI calculates exact "Last Safe Departure" countdowns. During severe blockades, our Operations Research engine (Google OR-Tools) executes autonomous payload-fracturing—dynamically splitting truck cargo to drones or 2-wheelers—and enforces Population × Criticality weighted routing for isolated villages.
+
+Expected Impact: PrakritiAI transforms NER logistics from reactive to predictive. By guaranteeing zero abandonment of cargo and providing military-grade supply chain resilience, it ensures life-saving commodities always reach remote districts, accelerating infrastructure and economic development.
