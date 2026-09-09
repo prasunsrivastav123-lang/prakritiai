@@ -100,6 +100,8 @@ export default function NerMap({
   depots = [],
   villages = [],
   trafficOverlay = [],
+  pipelineRoute = null,
+  endpoints = [],
   layers: layerProps = { roads: true, vehicles: true, incidents: true, traffic: false },
   onRoadClick,
   center,
@@ -173,6 +175,7 @@ export default function NerMap({
         map.addSource("fallback_track", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addSource("fallback_drone", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addSource("fallback_heli", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("pipeline_route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
 
         map.addLayer({
           id: "hazard-zones-fill", type: "fill", source: "hazard_zones",
@@ -249,6 +252,26 @@ export default function NerMap({
           id: "fallback-heli-line", type: "line", source: "fallback_heli",
           layout: { "line-cap": "round", "line-join": "round" },
           paint: { "line-color": STATUS_COLORS.FALLBACK_HELI, "line-width": 2.5, "line-dasharray": [6, 3, 1, 3], "line-opacity": 0.85 }
+        });
+
+        // "Find Route" panel's result — a white casing under a survivability-
+        // colored line (green = safe, amber = moderate, red = risky) so it
+        // reads clearly against roads/alt-routes/hazards already on screen.
+        map.addLayer({
+          id: "pipeline-route-casing", type: "line", source: "pipeline_route",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#fff", "line-width": 8, "line-opacity": 0.9 }
+        });
+        map.addLayer({
+          id: "pipeline-route-line", type: "line", source: "pipeline_route",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": [
+              "step", ["coalesce", ["get", "survivability"], 1],
+              "#DC2626", 0.6, "#EAB308", 0.85, "#16A34A",
+            ],
+            "line-width": 5,
+          }
         });
 
         map.on("click", ["fallback-track-line", "fallback-drone-line", "fallback-heli-line"], (e) => {
@@ -398,6 +421,8 @@ export default function NerMap({
       };
       map.getSource("hazard_zones").setData(hazardZonesFC);
 
+      map.getSource("pipeline_route").setData(pipelineRoute || { type: "FeatureCollection", features: [] });
+
       if (layers.traffic) {
         const trafficFC = {
           type: "FeatureCollection",
@@ -413,7 +438,7 @@ export default function NerMap({
     } catch (err) {
       console.error("NerMap: error updating sources", err);
     }
-  }, [roads, blockedEdges, alternativeRoutes, prePositioningRoutes, commodityRoutes, fallbackRoutes, hazards, trafficOverlay, layers.traffic, layers.fallbackRoutes]);
+  }, [roads, blockedEdges, alternativeRoutes, prePositioningRoutes, commodityRoutes, fallbackRoutes, hazards, trafficOverlay, pipelineRoute, layers.traffic, layers.fallbackRoutes]);
 
   // Update Markers — ALL with NaN guards
   useEffect(() => {
@@ -425,7 +450,7 @@ export default function NerMap({
         if (Array.isArray(m)) m.forEach(x => x && x.remove && x.remove());
         else if (m) m.remove && m.remove();
       });
-      markersRef.current = { vehicles: [], hazards: [], depots: [], villages: [], helipads: [], tempPin: null };
+      markersRef.current = { vehicles: [], hazards: [], depots: [], villages: [], helipads: [], endpoints: [], routeDots: [], tempPin: null };
 
       if (layers.vehicles) {
         (vehicles || []).forEach(v => {
@@ -525,6 +550,35 @@ export default function NerMap({
         markersRef.current.helipads.push(marker);
       });
 
+      (endpoints || []).forEach(pt => {
+        if (typeof pt?.lat !== "number" || typeof pt?.lng !== "number" || isNaN(pt.lat) || isNaN(pt.lng)) return;
+        const el = document.createElement("div");
+        el.style.cssText = "width:26px;height:26px;background:#1F2937;color:#fff;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;";
+        el.innerText = pt.label || "";
+        markersRef.current.endpoints.push(new Marker({ element: el }).setLngLat([pt.lng, pt.lat]).addTo(map));
+      });
+
+      // "Find Route" panel's result, drawn as a trail of DOM dot-markers
+      // rather than a GeoJSON line layer. This map's WebGL line/fill layers
+      // (roads, alt-routes, hazard zones, etc.) do not visibly paint in
+      // testing regardless of correct data/config, while Marker-based DOM
+      // elements (every hazard/depot/village/vehicle pin above) always do —
+      // so the route trail uses that same proven mechanism instead.
+      const routeCoords = pipelineRoute?.features?.[0]?.geometry?.coordinates;
+      if (Array.isArray(routeCoords) && routeCoords.length > 1) {
+        const survivability = pipelineRoute.features[0].properties?.survivability ?? 1;
+        const dotColor = survivability >= 0.85 ? "#16A34A" : survivability >= 0.6 ? "#EAB308" : "#DC2626";
+        const targetDots = 40;
+        const step = Math.max(1, Math.floor(routeCoords.length / targetDots));
+        for (let i = 0; i < routeCoords.length; i += step) {
+          const [lng, lat] = routeCoords[i];
+          if (typeof lng !== "number" || typeof lat !== "number" || isNaN(lng) || isNaN(lat)) continue;
+          const el = document.createElement("div");
+          el.style.cssText = `width:9px;height:9px;background:${dotColor};border-radius:50%;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4);`;
+          markersRef.current.routeDots.push(new Marker({ element: el }).setLngLat([lng, lat]).addTo(map));
+        }
+      }
+
       if (temporaryPin) {
         const coords = getCoords(temporaryPin);
         if (coords) {
@@ -537,7 +591,7 @@ export default function NerMap({
     } catch (err) {
       console.error("NerMap: error updating markers", err);
     }
-  }, [vehicles, hazards, depots, villages, helipads, fallbackOptions, temporaryPin, layers.vehicles]);
+  }, [vehicles, hazards, depots, villages, helipads, fallbackOptions, temporaryPin, endpoints, pipelineRoute, layers.vehicles]);
 
   useEffect(() => {
     if (mapRef.current) {

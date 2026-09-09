@@ -41,6 +41,7 @@ export default function Routes() {
   const [roads, setRoads] = useState(null);
   const [zones, setZones] = useState([]);
   const [environment, setEnvironment] = useState(null);
+  const [pipelineRoute, setPipelineRoute] = useState(null);
   const lastQuery = useRef(null);
 
   useEffect(() => {
@@ -144,6 +145,23 @@ export default function Routes() {
   const rr = result?.recommended_route;
   const band = rr ? riskBand(rr.risk_score) : null;
 
+  // "Find Route" panel's pipeline result (real OSM graph + AI risk model) —
+  // separate from the place-name routeGeoJSON above, drawn as its own layer.
+  const pipelineRouteGeoJSON = pipelineRoute?.best_route?.geometry
+    ? {
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", geometry: pipelineRoute.best_route.geometry, properties: { survivability: pipelineRoute.best_route.survivability } },
+        ],
+      }
+    : null;
+  const pipelineEndpoints = pipelineRoute
+    ? [
+        { lng: pipelineRoute.origin.lon, lat: pipelineRoute.origin.lat, label: "A" },
+        { lng: pipelineRoute.destination.lon, lat: pipelineRoute.destination.lat, label: "B" },
+      ]
+    : [];
+
   return (
     <div className="h-screen flex bg-[var(--surface-base)] overflow-hidden" data-testid="routes-page">
       <NavRail />
@@ -158,7 +176,7 @@ export default function Routes() {
         <div className="flex-1 flex min-h-0">
           {/* Left: form + results */}
           <div className="w-[380px] flex-shrink-0 bg-white border-r hairline overflow-y-auto p-5 space-y-6">
-            <RouteCalculationPanel />
+            <RouteCalculationPanel onRouteCalculated={setPipelineRoute} />
             <hr className="border-t" />
             <form onSubmit={onSubmit} className="space-y-4" data-testid="route-form">
               <div>
@@ -326,7 +344,8 @@ export default function Routes() {
               endpoints={result ? [
                 { lng: result.origin.lng, lat: result.origin.lat, label: "A" },
                 { lng: result.destination.lng, lat: result.destination.lat, label: "B" },
-              ] : []}
+              ] : pipelineEndpoints}
+              pipelineRoute={pipelineRouteGeoJSON}
             />
             <div className="absolute bottom-3 left-3 bg-white/95 border hairline rounded-md shadow-sm px-3 py-2 z-10" data-testid="routes-map-legend">
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">

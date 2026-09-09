@@ -92,3 +92,13 @@ memory/test_credentials.md
 android-sdk/frontend/node_modules/.cache/default-development/11.pack
 frontend/node_modules/.cache/default-development/9.pack
 frontend/node_modules/.cache/default-development/11.pack
+
+# Local Claude Code session config (machine-specific paths, PID locks)
+.claude/
+
+# Repomix context-dump exports (large, regenerable scratch files)
+repomix-output*.txt
+"repomix-output (2).txt"
+
+# Nested gis_pipeline has its own git history — not folded into this repo
+gis_pipeline/

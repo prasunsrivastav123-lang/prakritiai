@@ -360,29 +360,69 @@ async def calculate_route(req: RouteRequest):
             build_graph, risk_aware_dijkstra,
             get_k_feasible_paths_hybrid, RouteResult
         )
+        from shapely.ops import linemerge
 
         try:
-            # Find nearest edges to origin/destination
-            source_edge = _find_nearest_edge(req.origin_lat, req.origin_lon)
-            target_edge = _find_nearest_edge(req.dest_lat, req.dest_lon)
+            # Snap origin/destination to the nearest road, then take that
+            # edge's node id (not the edge_id string) — risk_aware_dijkstra /
+            # get_k_feasible_paths_hybrid traverse nx nodes, matching the
+            # fix already applied to inject-and-optimize's commodity routing.
+            source_match = _find_nearest_edge_meta(req.origin_lat, req.origin_lon, max_distance_m=5000)
+            target_match = _find_nearest_edge_meta(req.dest_lat, req.dest_lon, max_distance_m=5000)
+            if not source_match or not target_match:
+                raise HTTPException(status_code=404, detail="No road found within 5km of origin or destination")
+            source_node = str(source_match.get("u") or source_match.get("v"))
+            target_node = str(target_match.get("u") or target_match.get("v"))
 
             # Build or get cached graph
             G = _get_graph()
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"Data unavailable: {e}")
 
-        # Get best route via risk-aware Dijkstra
+        # Get best route via risk-aware Dijkstra (edge survivability grows
+        # with each edge's AI-predicted risk_growth_per_hour — see
+        # ml.pipeline.routing.edge_survival)
         best_route = risk_aware_dijkstra(
-            G, source_edge, target_edge,
+            G, source_node, target_node,
             min_survivability=req.min_survivability
         )
 
-        # Get K alternative paths
+        # Get an alternative via the hybrid A* engine (same risk model)
         alternatives = get_k_feasible_paths_hybrid(
-            G, source_edge, target_edge,
+            G, source_node, target_node,
             K=req.k_paths,
             min_survivability=req.min_survivability
         )
+
+        # Build an O(1) (u,v)-pair -> geometry index once, instead of a full
+        # table scan per edge — a 180-edge path over 15k road rows means the
+        # naive per-edge boolean-filter approach does ~2.7M row comparisons
+        # per route (worse for two routes), which is where the multi-second
+        # lag actually came from when this was first measured live.
+        roads_df = _get_roads()
+        edge_geom_by_pair = {
+            frozenset((row.u, row.v)): row.geometry
+            for row in roads_df.itertuples(index=False)
+            if row.geometry is not None and not row.geometry.is_empty
+        }
+
+        def _path_geometry(path):
+            """Merge each edge's real road geometry along a node path into one polyline."""
+            if not path or len(path) < 2:
+                return None
+            segments = []
+            for i in range(len(path) - 1):
+                geom = edge_geom_by_pair.get(frozenset((path[i], path[i + 1])))
+                if geom is not None:
+                    segments.append(geom)
+            if not segments:
+                return None
+            try:
+                return mapping(linemerge(segments))
+            except Exception:
+                return None
 
         def _route_to_dict(r):
             """Convert RouteResult to dict (handles both RouteResult objects and tuples)."""
@@ -392,7 +432,9 @@ async def calculate_route(req: RouteRequest):
                 return {
                     "path": r.path if hasattr(r, 'path') else getattr(r, '_asdict', lambda: {})(),
                     "survivability": getattr(r, 'survivability', None),
-                    "travel_time": getattr(r, 'travel_time', None),
+                    "travel_time": getattr(r, 'travel_hours', None),
+                    "feasible": getattr(r, 'feasible', None),
+                    "geometry": _path_geometry(getattr(r, 'path', None)),
                 }
             if isinstance(r, tuple):
                 return {"raw": str(r)}
@@ -402,8 +444,10 @@ async def calculate_route(req: RouteRequest):
 
         return {
             "status": "success",
-            "source_edge": source_edge,
-            "target_edge": target_edge,
+            "source_node": source_node,
+            "target_node": target_node,
+            "origin": {"lat": req.origin_lat, "lon": req.origin_lon},
+            "destination": {"lat": req.dest_lat, "lon": req.dest_lon},
             "best_route": _route_to_dict(best_route),
             "alternative_routes": [_route_to_dict(r) for r in (alternatives or [])],
             "min_survivability": req.min_survivability,
@@ -641,6 +685,10 @@ async def inject_and_optimize(req: InjectHazardRequest):
 
     severity_map = {"low": 0.4, "medium": 0.7, "high": 0.95, "critical": 1.0}
     clearance_map = {"low": 2.0, "medium": 6.0, "high": 12.0, "critical": 9999.0}
+    # Per-hour rate at which this hazard's effective block probability keeps
+    # climbing the longer a vehicle takes to reach it (e.g. continued rain
+    # worsening a landslide) — consumed by ml.pipeline.routing.edge_survival.
+    risk_growth_map = {"low": 0.01, "medium": 0.03, "high": 0.05, "critical": 0.08}
     blockage = severity_map[req.severity]
     match = _find_nearest_edge_meta(req.lat, req.lon, max_distance_m=500)
 
@@ -759,6 +807,7 @@ async def inject_and_optimize(req: InjectHazardRequest):
                 if G.has_edge(a, b):
                     G[a][b]["closed"] = True
                     G[a][b]["block_probability"] = blockage
+                    G[a][b]["risk_growth_per_hour"] = risk_growth_map[req.severity]
                     # edge_survival()'s sigmoid treats a block as "likely
                     # already cleared" once arrival_hours exceeds
                     # reopen_after_hours — which defaults to 0 on edges that
@@ -1186,6 +1235,57 @@ async def ai_predict(req: AIPredictRequest):
             "origin": {"lat": req.lat, "lon": req.lon},
             "note": "pre-position to nearest depot covering this coordinate",
         }
+
+        # Replace the flat per-vehicle guess above with a real LP-optimized
+        # allocation when we know which village(s) are actually at risk (i.e.
+        # the coordinate matched a real supply route). Small problem size
+        # (<=5 depots x <=2 villages per commodity) so this stays fast; falls
+        # back to the heuristic above on any failure or when nothing matched.
+        if affected_routes:
+            try:
+                from ml.pipeline.preposition_lp import optimize_prepositioning
+
+                def _hav_km(lat1, lon1, lat2, lon2):
+                    R = 6371.0
+                    p1, p2 = math.radians(lat1), math.radians(lat2)
+                    dphi, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+                    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+                    return 2 * R * math.asin(math.sqrt(a))
+
+                village_ids = list({r["village_id"] for r in affected_routes if r.get("village_id")})
+                all_depots = await db.depots.find({}, {"_id": 0}).to_list(50)
+                at_risk_villages = await db.villages.find({"id": {"$in": village_ids}}, {"_id": 0}).to_list(50)
+                depot_ids = [d["id"] for d in all_depots]
+                depot_by_id = {d["id"]: d for d in all_depots}
+                village_by_id = {v["id"]: v for v in at_risk_villages}
+
+                needed_commodities = set()
+                for v in at_risk_villages:
+                    needed_commodities.update((v.get("demand") or {}).keys())
+
+                lp_commodities = {}
+                for commodity in needed_commodities:
+                    demand = {v_id: (village_by_id[v_id].get("demand") or {}).get(commodity, 0) for v_id in village_ids}
+                    if sum(demand.values()) <= 0:
+                        continue
+                    inventory = {d_id: (depot_by_id[d_id].get("inventory") or {}).get(commodity, 0) for d_id in depot_ids}
+                    transport_cost = {
+                        (d_id, v_id): _hav_km(
+                            depot_by_id[d_id]["lat"], depot_by_id[d_id]["lon"],
+                            village_by_id[v_id]["lat"], village_by_id[v_id]["lon"],
+                        )
+                        for d_id in depot_ids for v_id in village_ids
+                    }
+                    allocation = optimize_prepositioning(depot_ids, village_ids, inventory, demand, transport_cost)
+                    qty = round(sum(allocation.values()))
+                    if qty > 0:
+                        lp_commodities[commodity] = qty
+
+                if lp_commodities:
+                    commodities = lp_commodities
+            except Exception as e:
+                logger.warning(f"Prepositioning LP failed, using heuristic fallback: {e}")
+
         pre_cost = n_vehicles * 25000
         emergency_cost = (n_vehicles + 1) * 35000
         savings = emergency_cost - pre_cost

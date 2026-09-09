@@ -91,6 +91,11 @@ class HybridRoutingEngine:
         return travel_hours, "topo_fallback"
 
     def find_optimal_path(self, source: str, target: str, min_survivability: float = 0.85) -> HybridRouteResult:
+        # Deferred import: routing.py imports this module at module load time,
+        # so importing it back at module scope here would be circular. Safe by
+        # call time, since routing.py has already finished loading by then.
+        from ml.pipeline.routing import edge_survival
+
         if source not in self.G or target not in self.G:
             return HybridRouteResult([], float("inf"), 0, "error", 0.0)
 
@@ -111,18 +116,10 @@ class HybridRoutingEngine:
                 if v in visited: continue
                     
                 travel_hours, mode = self.evaluate_edge_weight(u, v, edge_data)
-                
-                # Calculate Risk / Survivability
-                p0 = float(edge_data.get("block_probability", 0.0))
-                clearance = max(float(edge_data.get("reopen_after_hours", 6.0)), 1e-3)
-                # Clamp: a search exploring a long detour can reach very large
-                # g (elapsed hours); math.exp overflows well before that.
-                exponent = max(-700.0, min(700.0, 6.0 * (g - clearance) / clearance))
-                decay = 1.0 / (1.0 + math.exp(exponent))
-                p_t = p0 * decay
-                edge_survival = 1.0 - min(p_t, 0.99)
-                
-                new_surv = surv * edge_survival
+
+                # Risk-adjusted survival — same AI-risk-aware model used by the
+                # plain Dijkstra fallback, so both algorithms agree on risk.
+                new_surv = surv * edge_survival(edge_data, g)
                 if new_surv < min_survivability: continue
                     
                 new_g = g + travel_hours

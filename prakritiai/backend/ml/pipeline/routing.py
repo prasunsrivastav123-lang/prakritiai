@@ -17,8 +17,16 @@ class RouteResult:
     feasible: bool
 
 def edge_survival(edge_data: Dict[str, Any], arrival_hours: float) -> float:
-    """Calculates edge survival using Sigmoid decay."""
+    """Calculates edge survival using Sigmoid decay.
+
+    Block probability isn't static: the AI hazard model's risk_growth_per_hour
+    for this edge (e.g. worsening rain intensifying a landslide risk) compounds
+    the longer it takes to reach it, so the effective baseline risk grows with
+    arrival_hours before the sigmoid clearance-decay is applied on top.
+    """
     p0 = float(edge_data.get("block_probability", 0.0))
+    growth_per_hour = float(edge_data.get("risk_growth_per_hour", 0.0))
+    p0 = min(1.0, p0 + growth_per_hour * max(arrival_hours, 0.0))
     if p0 <= 0:
         return 1.0
     clearance = max(float(edge_data.get("reopen_after_hours", 6.0)), 1e-3)

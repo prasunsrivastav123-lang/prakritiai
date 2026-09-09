@@ -12,10 +12,13 @@ import { Route as RouteIcon, Navigation, MapPin, ChevronDown } from "lucide-reac
 export default function RouteCalculationPanel({ onRouteCalculated }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  // Defaults: Shillong Central Depot -> Umsaw Myllium — both inside the
+  // loaded ~12km Shillong road network (the old destination, Guwahati, was
+  // ~65km outside it, so "Find Route" could never find a road to snap to).
   const [originLat, setOriginLat] = useState("25.5759");
   const [originLon, setOriginLon] = useState("91.8827");
-  const [destLat, setDestLat] = useState("26.1445");
-  const [destLon, setDestLon] = useState("91.7362");
+  const [destLat, setDestLat] = useState("25.507");
+  const [destLon, setDestLon] = useState("91.8565");
   const [minSurvivability, setMinSurvivability] = useState(0.85);
   const [kPaths, setKPaths] = useState(3);
   const [result, setResult] = useState(null);
@@ -51,8 +54,9 @@ export default function RouteCalculationPanel({ onRouteCalculated }) {
       setResult(res);
       toast({ title: "Success", description: "Route calculated successfully." });
       if (onRouteCalculated && res.best_route && res.best_route.path) {
-        // Just pass the best route for map visualization
-        onRouteCalculated(res.best_route);
+        // Pass the full response (not just best_route) so the map has the
+        // origin/destination coordinates for endpoint markers too.
+        onRouteCalculated(res);
       }
     } catch (err) {
       toast({ title: "Error", description: err.message || "Failed to calculate route.", variant: "destructive" });

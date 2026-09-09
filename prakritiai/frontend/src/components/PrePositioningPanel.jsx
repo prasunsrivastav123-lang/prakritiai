@@ -26,8 +26,11 @@ export default function PrePositioningPanel({ onPrediction }) {
         historical_landslide_frequency: 7,
         historical_flood_frequency: 5,
       };
-      // FIXED: pass lat, lon, params (was just params before)
-      const res = await getAIPrediction(25.675, 94.1086, params);
+      // Umsaw Myllium (dep-shillong's seeded village) — inside the loaded
+      // road network and has a real supply_routes document, so the backend
+      // can actually resolve a named depot/village instead of falling back
+      // to the nameless generic route hint.
+      const res = await getAIPrediction(25.507, 91.8565, params);
       console.log("Rainfall prediction:", res);
       setPrediction(res);
       if (onPrediction) onPrediction(res);
@@ -64,8 +67,7 @@ export default function PrePositioningPanel({ onPrediction }) {
         historical_flood_frequency: 8,
         historical_landslide_frequency: 1,
       };
-      // FIXED: pass lat, lon, params
-      const res = await getAIPrediction(25.675, 94.1086, params);
+      const res = await getAIPrediction(25.507, 91.8565, params);
       console.log("Flood prediction:", res);
       setPrediction(res);
       if (onPrediction) onPrediction(res);
@@ -109,6 +111,13 @@ export default function PrePositioningPanel({ onPrediction }) {
 
   // Use ACTUAL cost comparison from API
   const costData = prediction?.cost_comparison || null;
+
+  // route_hint is either a real supply_routes doc (origin.name/destination.name
+  // populated) when the coordinate matched a known route, or a nameless
+  // generic fallback ({origin: {lat,lon}, note}) otherwise.
+  const routeHint = prediction?.pre_positioning_plan?.route || null;
+  const depotName = routeHint?.origin?.name || null;
+  const villageName = routeHint?.destination?.name || null;
 
   return (
     <Card className="w-80 shadow-lg pointer-events-auto max-h-[90vh] overflow-y-auto">
@@ -163,6 +172,18 @@ export default function PrePositioningPanel({ onPrediction }) {
             {prediction.pre_positioning_recommended && prediction.pre_positioning_plan ? (
               <div className="space-y-3 pt-3 border-t">
                 <div className="text-[11px] font-bold uppercase text-neutral-400 tracking-wider">Pre-Positioning Plan</div>
+
+                {depotName && villageName ? (
+                  <div className="flex items-center justify-between text-[12px] bg-neutral-50 p-2 rounded border">
+                    <span className="font-semibold text-neutral-800">{depotName}</span>
+                    <span className="text-neutral-400">&rarr;</span>
+                    <span className="font-semibold text-neutral-800">{villageName}</span>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-neutral-500 bg-neutral-50 p-2 rounded border">
+                    {routeHint?.note || "No specific depot/village matched for this coordinate."}
+                  </div>
+                )}
 
                 {/* Commodities — converted from object to array */}
                 {commoditiesArray.length > 0 && (
